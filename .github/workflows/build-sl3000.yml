@@ -31,13 +31,18 @@ jobs:
           sudo rm -rf /usr/local/lib/android
           df -h
 
-      # 4. SL3000 环境自检
+      # 4. 准备 .config（复制 sl3000.config）
+      - name: Prepare config
+        run: |
+          cp config/sl3000.config .config
+
+      # 5. SL3000 环境自检
       - name: Check SL3000 environment
         run: |
           chmod +x scripts/check-sl3000-env.sh
           ./scripts/check-sl3000-env.sh
 
-      # 5. ccache 缓存
+      # 6. ccache 缓存
       - name: Cache ccache
         uses: actions/cache@v4
         with:
@@ -46,7 +51,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-ccache-
 
-      # 6. dl 缓存
+      # 7. dl 缓存
       - name: Cache dl
         uses: actions/cache@v4
         with:
@@ -55,7 +60,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-dl-
 
-      # 7. 自动打 tag
+      # 8. 自动打 tag
       - name: Create tag
         run: |
           git config user.name github-actions
@@ -65,18 +70,18 @@ jobs:
           git push origin $TAG
           echo "TAG=$TAG" >> $GITHUB_ENV
 
-      # 8. 构建固件（单设备 SL3000）
+      # 9. 构建固件（单设备 SL3000）
       - name: Build firmware
         run: |
           make -j$(nproc)
 
-      # 9. 生成 sha256sum 校验文件
+      # 10. 生成 sha256sum 校验文件
       - name: Generate sha256sum
         run: |
           cd bin/targets/mediatek/filogic
           sha256sum *.bin > sha256sum.txt
 
-      # 10. 发布 Release
+      # 11. 发布 Release
       - name: Release firmware
         uses: softprops/action-gh-release@v2
         with:
