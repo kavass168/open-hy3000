@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. 拉取你自己的仓库（三件套）
+      # 1. 拉取你自己的仓库（三件套 + 检测脚本）
       - name: Checkout SL3000 repo
         uses: actions/checkout@v4
 
@@ -35,7 +35,13 @@ jobs:
           cp dts/mt7981-sl3000-emmc.dts openwrt/target/linux/mediatek/dts/
           cp config/sl3000.config openwrt/.config
 
-      # 4. 磁盘优化
+      # ✅ 4. 运行你的检测脚本（你特别强调必须加）
+      - name: Run SL3000 environment check
+        run: |
+          chmod +x scripts/check-sl3000-env.sh
+          ./scripts/check-sl3000-env.sh
+
+      # 5. 磁盘优化
       - name: Expand disk space
         run: |
           sudo rm -rf /usr/share/dotnet
@@ -43,7 +49,7 @@ jobs:
           sudo rm -rf /usr/local/lib/android
           df -h
 
-      # 5. ccache 缓存
+      # 6. ccache 缓存
       - name: Cache ccache
         uses: actions/cache@v4
         with:
@@ -52,7 +58,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-ccache-
 
-      # 6. dl 缓存
+      # 7. dl 缓存
       - name: Cache dl
         uses: actions/cache@v4
         with:
@@ -61,7 +67,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-dl-
 
-      # 7. 自动创建 tag（不会 403）
+      # 8. 自动创建 tag（不会 403）
       - name: Create tag
         run: |
           git config user.name "github-actions"
@@ -71,20 +77,20 @@ jobs:
           git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }} $TAG
           echo "TAG=$TAG" >> $GITHUB_ENV
 
-      # 8. 构建固件
+      # 9. 构建固件
       - name: Build firmware
         run: |
           cd openwrt
           make defconfig
           make -j$(nproc)
 
-      # 9. 生成 sha256sum
+      # 10. 生成 sha256sum
       - name: Generate sha256sum
         run: |
           cd openwrt/bin/targets/mediatek/filogic
           sha256sum *.bin > sha256sum.txt
 
-      # 10. 发布 Release
+      # 11. 发布 Release
       - name: Release firmware
         uses: softprops/action-gh-release@v2
         with:
