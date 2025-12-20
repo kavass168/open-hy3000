@@ -1,4 +1,4 @@
-name: Build SL3000 (ImmortalWrt 25.12)
+name: Build SL3000 (WiFi 路由器纯净版)
 
 on:
   workflow_dispatch:
@@ -23,28 +23,33 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      # 3. 覆盖三件套到官方源码
+      # 3. 覆盖三件套到 openwrt 源码目录
       - name: Apply SL3000 device files
         run: |
           cp image/filogic.mk openwrt/target/linux/mediatek/image/
           cp dts/mt7981-sl3000-emmc.dts openwrt/target/linux/mediatek/dts/
           cp config/sl3000.config openwrt/.config
 
-      # 4. 运行新版检测脚本（检查 openwrt/ 目录）
+      # 4. 运行环境检测脚本（检查 openwrt/ 目录是否准备好）
       - name: Run SL3000 environment check
         run: |
           chmod +x scripts/check-sl3000-env.sh
           ./scripts/check-sl3000-env.sh
 
-      # 5. 磁盘优化
+      # 5. 磁盘空间优化（最大化留给编译用）
       - name: Expand disk space
         run: |
+          echo "Before cleanup:"
+          df -h
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /opt/ghc
           sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/hostedtoolcache
+          sudo docker system prune -af || true
+          echo "After cleanup:"
           df -h
 
-      # 6. ccache 缓存
+      # 6. ccache 缓存（加速重复构建）
       - name: Cache ccache
         uses: actions/cache@v4
         with:
@@ -53,7 +58,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-ccache-
 
-      # 7. dl 缓存
+      # 7. dl 目录缓存（加速 feeds/download）
       - name: Cache dl
         uses: actions/cache@v4
         with:
@@ -62,7 +67,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-dl-
 
-      # 8. 自动创建 tag（不会 403）
+      # 8. 创建 tag（用 GITHUB_TOKEN，避免 403）
       - name: Create tag
         run: |
           git config user.name "github-actions"
@@ -72,12 +77,12 @@ jobs:
           git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }} $TAG
           echo "TAG=$TAG" >> $GITHUB_ENV
 
-      # 9. 构建固件
+      # 9. 编译固件
       - name: Build firmware
         run: |
           cd openwrt
           make defconfig
-          make -j$(nproc)
+          make -j$(nproc) V=s
 
       # 10. 生成 sha256sum
       - name: Generate sha256sum
@@ -90,7 +95,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
-          name: "SL3000 ImmortalWrt 25.12 ${{ env.TAG }}"
+          name: "SL3000 WiFi 路由器纯净版 ${{ env.TAG }}"
           files: |
             openwrt/bin/targets/mediatek/filogic/*.bin
             openwrt/bin/targets/mediatek/filogic/sha256sum.txt
