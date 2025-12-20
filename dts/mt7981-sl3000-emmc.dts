@@ -1,5 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
-
 /dts-v1/;
 
 #include "mt7981.dtsi"
@@ -54,7 +52,7 @@
     };
 };
 
-/* MDIO bus */
+/* MDIO bus + MT7531 switch */
 &mdio_bus {
     status = "okay";
 
