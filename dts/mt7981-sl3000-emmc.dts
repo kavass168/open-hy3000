@@ -1,0 +1,48 @@
+// SPDX-License-Identifier: GPL-2.0-or-later OR MIT
+
+/dts-v1/;
+#include "mt7981.dtsi"
+
+/ {
+    model = "SL3000 eMMC";
+    compatible = "sl3000-emmc", "mediatek,mt7981";
+
+    chosen {
+        bootargs = "console=ttyS0,115200n8";
+    };
+
+    gpio-leds {
+        compatible = "gpio-leds";
+
+        status_led {
+            label = "sl3000:blue:status";
+            gpios = <&gpio 10 GPIO_ACTIVE_LOW>;
+        };
+    };
+
+    gpio-keys {
+        compatible = "gpio-keys";
+
+        reset {
+            label = "reset";
+            gpios = <&gpio 11 GPIO_ACTIVE_LOW>;
+            linux,code = <KEY_RESTART>;
+        };
+    };
+};
+
+&uart0 {
+    status = "okay";
+};
+
+&mmc0 {
+    status = "okay";
+};
+
+&eth {
+    status = "okay";
+};
+
+&wifi {
+    status = "okay";
+};
