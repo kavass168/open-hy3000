@@ -1,4 +1,4 @@
-name: Build SL3000 (WiFi 路由器纯净版)
+name: Build SL3000
 
 on:
   workflow_dispatch:
@@ -11,11 +11,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. 拉取你的仓库（包含三件套 + 检测脚本）
       - name: Checkout SL3000 repo
         uses: actions/checkout@v4
 
-      # 2. 克隆官方 ImmortalWrt 25.12 源码
       - name: Clone ImmortalWrt 25.12
         run: |
           git clone --branch openwrt-25.12 https://github.com/immortalwrt/immortalwrt.git openwrt
@@ -23,42 +21,25 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      # 3. 覆盖三件套到 openwrt/ 目录
       - name: Apply SL3000 device files
         run: |
           cp image/filogic.mk openwrt/target/linux/mediatek/image/
           cp dts/mt7981-sl3000-emmc.dts openwrt/target/linux/mediatek/dts/
           cp config/sl3000.config openwrt/.config
 
-      # 4. 运行环境检测脚本（检查 openwrt/ 目录）
-      - name: Run SL3000 environment check
+      - name: Register SL3000 DTS in mediatek dts Makefile
         run: |
-          chmod +x scripts/check-sl3000-env.sh
-          ./scripts/check-sl3000-env.sh
+          DTS_MK="openwrt/target/linux/mediatek/dts/Makefile"
+          if ! grep -q "mt7981-sl3000-emmc.dts" "$DTS_MK"; then
+            echo 'DTS_MT7981 += mt7981-sl3000-emmc.dts' >> "$DTS_MK"
+          fi
+          echo "✅ DTS 已注册：mt7981-sl3000-emmc.dts"
 
-      # 5. 最大化磁盘空间（避免爆盘）
       - name: Expand disk space
         run: |
-          echo "Before cleanup:"
-          df -h
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/hostedtoolcache
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache
           sudo docker system prune -af || true
-          echo "After cleanup:"
-          df -h
 
-      # 6. ccache 缓存
-      - name: Cache ccache
-        uses: actions/cache@v4
-        with:
-          path: ~/.ccache
-          key: ${{ runner.os }}-ccache-${{ github.run_id }}
-          restore-keys: |
-            ${{ runner.os }}-ccache-
-
-      # 7. dl 缓存
       - name: Cache dl
         uses: actions/cache@v4
         with:
@@ -67,17 +48,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-dl-
 
-      # 8. 创建 tag（使用 GITHUB_TOKEN）
-      - name: Create tag
-        run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          TAG="v$(date +'%Y%m%d')-${{ github.run_number }}"
-          git tag $TAG
-          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }} $TAG
-          echo "TAG=$TAG" >> $GITHUB_ENV
-
-      # 9. 编译固件（失败时标记 BUILD_FAILED）
       - name: Build firmware
         id: build_step
         run: |
@@ -85,14 +55,12 @@ jobs:
           make defconfig
           make -j$(nproc) V=s || echo "BUILD_FAILED=true" >> $GITHUB_ENV
 
-      # 10. 提取最后 500 行错误日志
-      - name: Extract last 500 lines of build log
+      - name: Extract last 500 lines
         if: env.BUILD_FAILED == 'true'
         run: |
           cd openwrt
           tail -n 500 build.log > ../last_500_lines.txt || true
 
-      # 11. 上传所有日志（失败时）
       - name: Upload logs
         if: env.BUILD_FAILED == 'true'
         uses: actions/upload-artifact@v4
@@ -102,22 +70,18 @@ jobs:
             last_500_lines.txt
             openwrt/build.log
             openwrt/logs/
-            **/*.txt
 
-      # 12. 生成 sha256sum（成功时）
       - name: Generate sha256sum
         if: env.BUILD_FAILED != 'true'
         run: |
           cd openwrt/bin/targets/mediatek/filogic
           sha256sum *.bin > sha256sum.txt
 
-      # 13. 发布 Release（成功时）
       - name: Release firmware
         if: env.BUILD_FAILED != 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ env.TAG }}
-          name: "SL3000 WiFi 路由器纯净版 ${{ env.TAG }}"
+          tag_name: v${{ github.run_number }}
           files: |
             openwrt/bin/targets/mediatek/filogic/*.bin
             openwrt/bin/targets/mediatek/filogic/sha256sum.txt
