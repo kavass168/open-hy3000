@@ -11,11 +11,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. 拉取你自己的仓库（三件套 + 检测脚本）
+      # 1. 拉取你的仓库（包含三件套 + 检测脚本）
       - name: Checkout SL3000 repo
         uses: actions/checkout@v4
 
-      # 2. 克隆 ImmortalWrt 25.12 官方源码
+      # 2. 克隆官方 ImmortalWrt 25.12 源码
       - name: Clone ImmortalWrt 25.12
         run: |
           git clone --branch openwrt-25.12 https://github.com/immortalwrt/immortalwrt.git openwrt
@@ -23,20 +23,20 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      # 3. 覆盖三件套到 openwrt 源码目录
+      # 3. 覆盖三件套到 openwrt/ 目录
       - name: Apply SL3000 device files
         run: |
           cp image/filogic.mk openwrt/target/linux/mediatek/image/
           cp dts/mt7981-sl3000-emmc.dts openwrt/target/linux/mediatek/dts/
           cp config/sl3000.config openwrt/.config
 
-      # 4. 运行环境检测脚本（检查 openwrt/ 目录是否准备好）
+      # 4. 运行环境检测脚本（检查 openwrt/ 目录）
       - name: Run SL3000 environment check
         run: |
           chmod +x scripts/check-sl3000-env.sh
           ./scripts/check-sl3000-env.sh
 
-      # 5. 磁盘空间优化（最大化留给编译用）
+      # 5. 最大化磁盘空间（避免爆盘）
       - name: Expand disk space
         run: |
           echo "Before cleanup:"
@@ -49,7 +49,7 @@ jobs:
           echo "After cleanup:"
           df -h
 
-      # 6. ccache 缓存（加速重复构建）
+      # 6. ccache 缓存
       - name: Cache ccache
         uses: actions/cache@v4
         with:
@@ -58,7 +58,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-ccache-
 
-      # 7. dl 目录缓存（加速 feeds/download）
+      # 7. dl 缓存
       - name: Cache dl
         uses: actions/cache@v4
         with:
@@ -67,7 +67,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-dl-
 
-      # 8. 创建 tag（用 GITHUB_TOKEN，避免 403）
+      # 8. 创建 tag（使用 GITHUB_TOKEN）
       - name: Create tag
         run: |
           git config user.name "github-actions"
@@ -77,21 +77,43 @@ jobs:
           git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }} $TAG
           echo "TAG=$TAG" >> $GITHUB_ENV
 
-      # 9. 编译固件
+      # 9. 编译固件（失败时标记 BUILD_FAILED）
       - name: Build firmware
+        id: build_step
         run: |
           cd openwrt
           make defconfig
-          make -j$(nproc) V=s
+          make -j$(nproc) V=s || echo "BUILD_FAILED=true" >> $GITHUB_ENV
 
-      # 10. 生成 sha256sum
+      # 10. 提取最后 500 行错误日志
+      - name: Extract last 500 lines of build log
+        if: env.BUILD_FAILED == 'true'
+        run: |
+          cd openwrt
+          tail -n 500 build.log > ../last_500_lines.txt || true
+
+      # 11. 上传所有日志（失败时）
+      - name: Upload logs
+        if: env.BUILD_FAILED == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: build_logs
+          path: |
+            last_500_lines.txt
+            openwrt/build.log
+            openwrt/logs/
+            **/*.txt
+
+      # 12. 生成 sha256sum（成功时）
       - name: Generate sha256sum
+        if: env.BUILD_FAILED != 'true'
         run: |
           cd openwrt/bin/targets/mediatek/filogic
           sha256sum *.bin > sha256sum.txt
 
-      # 11. 发布 Release
+      # 13. 发布 Release（成功时）
       - name: Release firmware
+        if: env.BUILD_FAILED != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
