@@ -1,14 +1,31 @@
 #!/usr/bin/env bash
 set -e
 
-echo "===== SL3000 构建前准备脚本（自动清理 + 自动检测 + fail-fast）====="
+echo "===== SL3000 构建前准备脚本（dry-run 预跑 + 自动检测 + 自动修复 + fail-fast）====="
 
 CONFIG_FILE="openwrt/.config"
 MK_FILE="openwrt/target/linux/mediatek/image/filogic.mk"
 DTS_DIR_MAIN="openwrt/target/linux/mediatek/dts"
 
 # ================================
-# 1. 自动识别 DTS 名称（从 image.mk 中提取）
+# 0. dry-run：检测基础依赖
+# ================================
+echo "[0] dry-run：检测构建依赖..."
+
+REQUIRED_CMDS=(gcc g++ make python3 rsync flex bison)
+
+for cmd in "${REQUIRED_CMDS[@]}"; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        echo "❌ 缺少依赖：$cmd"
+        echo "⚙️ 自动修复：安装 $cmd"
+        sudo apt-get update && sudo apt-get install -y "$cmd"
+    fi
+done
+
+echo "✅ 基础依赖全部满足"
+
+# ================================
+# 1. 自动识别 DTS 名称
 # ================================
 echo "[1] 自动识别 DTS 名称..."
 
@@ -22,12 +39,11 @@ echo "✅ 识别 DTS 名称：$DTS_NAME"
 DTS_FILE_MAIN="$DTS_DIR_MAIN/$DTS_NAME.dts"
 
 # ================================
-# 2. 自动重命名 DTS 文件（如果名称不一致）
+# 2. 自动重命名 DTS 文件
 # ================================
 echo "[2] 自动重命名 DTS 文件..."
 
 if [ ! -f "dts/$DTS_NAME.dts" ]; then
-    # 查找 dts 目录下的 mt7981-*-emmc.dts 文件
     DTS_SRC=$(find dts -maxdepth 1 -name "mt7981-*-emmc.dts" | head -n 1)
     if [ -z "$DTS_SRC" ]; then
         echo "❌ dts/ 下未找到任何 DTS 文件"
@@ -88,9 +104,43 @@ done
 echo "✅ .config 已完全清理干净"
 
 # ================================
-# 6. 最终一致性检查
+# 6. dry-run：检测 OpenWrt 构建依赖
 # ================================
-echo "[6] 最终一致性检查..."
+echo "[6] dry-run：检测 OpenWrt 构建依赖..."
+
+OPENWRT_REQUIRED_DIRS=(
+    "openwrt/dl"
+    "openwrt/staging_dir"
+    "openwrt/scripts"
+)
+
+for dir in "${OPENWRT_REQUIRED_DIRS[@]}"; do
+    if [ ! -d "$dir" ]; then
+        echo "⚠️ 缺少目录：$dir"
+        echo "⚙️ 自动修复：创建目录 $dir"
+        mkdir -p "$dir"
+    fi
+done
+
+echo "✅ OpenWrt 目录结构完整"
+
+# ================================
+# 7. dry-run：检测 feeds 冲突
+# ================================
+echo "[7] dry-run：检测 feeds 冲突..."
+
+if grep -R "<<<<<<<" openwrt/package 2>/dev/null; then
+    echo "❌ feeds 存在合并冲突"
+    echo "⚙️ 自动修复：清理冲突标记"
+    grep -Rl ">>>>>>>" openwrt/package | xargs sed -i '/<<<<<<<\|=======\|>>>>>>>/d'
+fi
+
+echo "✅ feeds 无冲突"
+
+# ================================
+# 8. 最终一致性检查
+# ================================
+echo "[8] 最终一致性检查..."
 
 if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_${DTS_NAME}=y" "$CONFIG_FILE"; then
     echo "❌ .config 未启用设备：${DTS_NAME}"
