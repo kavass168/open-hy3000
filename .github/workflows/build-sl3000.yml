@@ -15,7 +15,7 @@ jobs:
       - name: Checkout SL3000 repo
         uses: actions/checkout@v4
 
-      # 1. 安全版极限清理（不动 openwrt）
+      # 1. 安全版极限磁盘清理（不动 openwrt）
       - name: Safe aggressive disk cleanup
         run: |
           docker ps -aq | xargs -r docker rm -f || true
@@ -38,7 +38,7 @@ jobs:
 
           df -h
 
-      # 2. 依赖 + ccache
+      # 2. 安装依赖 + ccache
       - name: Install build deps
         run: |
           sudo apt-get update
@@ -66,7 +66,7 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      # 4. OpenWrt 缓存
+      # 4. OpenWrt 缓存（修复缩进）
       - name: Cache OpenWrt dl
         uses: actions/cache@v4
         with:
@@ -97,9 +97,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: openwrt/staging_dir/hostpkg
-        key: ${{ runner.os }}-hostpkg-${{ hashFiles('config/sl3000.config') }}
-        restore-keys: |
-          ${{ runner.os }}-hostpkg-
+          key: ${{ runner.os }}-hostpkg-${{ hashFiles('config/sl3000.config') }}
+          restore-keys: |
+            ${{ runner.os }}-hostpkg-
 
       # 5. 应用设备文件（自动检测 DTS 目录）
       - name: Apply SL3000 device files
@@ -110,7 +110,7 @@ jobs:
           cp -f image/filogic.mk openwrt/target/linux/mediatek/image/filogic.mk
           cp -f config/sl3000.config openwrt/.config
 
-      # 6. 构建前 sanity + 清理（fail-fast）
+      # 6. 构建前 sanity + 清理
       - name: Prepare SL3000 (sanity + clean)
         run: |
           chmod +x scripts/sl3000-prepare.sh
@@ -151,7 +151,7 @@ jobs:
           fi
           echo "✅ DTS 已同步到 kernel"
 
-      # 10. 编译前安全清理（不动 openwrt）
+      # 10. 编译前安全清理
       - name: Safe cleanup before build
         run: |
           docker system prune -af || true
