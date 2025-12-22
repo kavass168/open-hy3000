@@ -1,0 +1,104 @@
+// SPDX-License-Identifier: GPL-2.0-or-later OR MIT
+/dts-v1/;
+
+#include "mt7981.dtsi"
+
+/ {
+	model = "SL3000 (EMMC)";
+	compatible = "sl3000,mt7981-emmc", "mediatek,mt7981";
+
+	chosen {
+		bootargs = "console=ttyS0,115200n8";
+	};
+
+	/* 三色灯：红=开机，绿=信号，蓝=预留 */
+	leds {
+		compatible = "gpio-leds";
+
+		power_red {
+			label = "sl3000:red:power";
+			gpios = <&pio 0 GPIO_ACTIVE_LOW>; /* TODO: 替换真实 GPIO */
+			default-state = "on";
+		};
+
+		status_green {
+			label = "sl3000:green:status";
+			gpios = <&pio 1 GPIO_ACTIVE_LOW>; /* TODO: 替换真实 GPIO */
+			default-state = "off";
+		};
+
+		wifi_blue {
+			label = "sl3000:blue:wifi";
+			gpios = <&pio 2 GPIO_ACTIVE_LOW>; /* TODO: 替换真实 GPIO */
+			default-state = "off";
+		};
+	};
+};
+
+&uart0 {
+	status = "okay";
+};
+
+&mmc0 {
+	status = "okay";
+	bus-width = <8>;
+	max-frequency = <52000000>;
+	non-removable;
+	cap-mmc-highspeed;
+	cap-mmc-hs200-1_8v;
+};
+
+/* WAN=port0, LAN1=1, LAN2=2, LAN3=3 */
+&eth {
+	status = "okay";
+
+	gmac0: mac@0 {
+		status = "okay";
+		phy-mode = "sgmii";
+		fixed-link {
+			speed = <1000>;
+			full-duplex;
+		};
+	};
+
+	mdio: mdio-bus {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		switch@0 {
+			compatible = "mediatek,mt7531";
+			reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				port@0 {
+					reg = <0>;
+					label = "wan";
+				};
+
+				port@1 {
+					reg = <1>;
+					label = "lan1";
+				};
+
+				port@2 {
+					reg = <2>;
+					label = "lan2";
+				};
+
+				port@3 {
+					reg = <3>;
+					label = "lan3";
+				};
+			};
+		};
+	};
+};
+
+&wifi {
+	status = "okay";
+};
