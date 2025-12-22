@@ -4,88 +4,96 @@ set -e
 echo "===== SL3000 构建前准备脚本（自动清理 + 自动检测 + fail-fast）====="
 
 CONFIG_FILE="openwrt/.config"
-
-# ================================
-# 1. 只检查主 DTS 目录和 DTS 文件
-# ================================
+MK_FILE="openwrt/target/linux/mediatek/image/filogic.mk"
 DTS_DIR_MAIN="openwrt/target/linux/mediatek/dts"
-DTS_FILE_MAIN="$DTS_DIR_MAIN/mt7981-sl3000-emmc.dts"
 
-echo "[1] 检查主 DTS 目录和文件..."
+# ================================
+# 1. 自动识别 DTS 名称（从 image.mk 中提取）
+# ================================
+echo "[1] 自动识别 DTS 名称..."
 
-if [ ! -d "$DTS_DIR_MAIN" ]; then
-    echo "❌ 主 DTS 目录不存在：$DTS_DIR_MAIN"
+DTS_NAME=$(grep -E 'DEVICE_DTS\s*:?=' "$MK_FILE" | grep -o 'mt7981-[a-zA-Z0-9_-]*-emmc' | head -n 1)
+if [ -z "$DTS_NAME" ]; then
+    echo "❌ 无法从 filogic.mk 中识别 DTS 名称"
     exit 1
 fi
+echo "✅ 识别 DTS 名称：$DTS_NAME"
+
+DTS_FILE_MAIN="$DTS_DIR_MAIN/$DTS_NAME.dts"
+
+# ================================
+# 2. 自动重命名 DTS 文件（如果名称不一致）
+# ================================
+echo "[2] 自动重命名 DTS 文件..."
+
+if [ ! -f "dts/$DTS_NAME.dts" ]; then
+    # 查找 dts 目录下的 mt7981-*-emmc.dts 文件
+    DTS_SRC=$(find dts -maxdepth 1 -name "mt7981-*-emmc.dts" | head -n 1)
+    if [ -z "$DTS_SRC" ]; then
+        echo "❌ dts/ 下未找到任何 DTS 文件"
+        exit 1
+    fi
+    echo "⚠️ DTS 文件名不匹配，自动重命名：$DTS_SRC → dts/$DTS_NAME.dts"
+    cp -f "$DTS_SRC" "dts/$DTS_NAME.dts"
+else
+    echo "✅ DTS 文件名已匹配：dts/$DTS_NAME.dts"
+fi
+
+# ================================
+# 3. 复制 DTS 到主 DTS 目录
+# ================================
+echo "[3] 复制 DTS 到主 DTS 目录..."
+
+mkdir -p "$DTS_DIR_MAIN"
+cp -f "dts/$DTS_NAME.dts" "$DTS_FILE_MAIN"
 
 if [ ! -f "$DTS_FILE_MAIN" ]; then
-    echo "❌ 主 DTS 文件缺失：$DTS_FILE_MAIN"
+    echo "❌ DTS 文件复制失败：$DTS_FILE_MAIN"
     exit 1
 fi
-
-echo "✅ 主 DTS 文件存在：$DTS_FILE_MAIN"
+echo "✅ DTS 文件已复制到主 DTS 目录"
 
 # ================================
-# 2. 检查 filogic.mk 是否对齐
+# 4. 检查 filogic.mk 是否对齐
 # ================================
-echo "[2] 检查 filogic.mk..."
+echo "[4] 检查 filogic.mk..."
 
-MK_FILE="openwrt/target/linux/mediatek/image/filogic.mk"
-
-if [ ! -f "$MK_FILE" ]; then
-    echo "❌ 未找到 filogic.mk：$MK_FILE"
+if ! grep -q "$DTS_NAME" "$MK_FILE"; then
+    echo "❌ filogic.mk 未包含 DTS 名称：$DTS_NAME"
     exit 1
 fi
-
-if ! grep -q "DEVICE_DTS := mediatek/mt7981-sl3000-emmc" "$MK_FILE"; then
-    echo "❌ filogic.mk 未对齐 DEVICE_DTS"
-    exit 1
-fi
-
-echo "✅ filogic.mk 对齐正确"
+echo "✅ filogic.mk 包含 DTS 名称"
 
 # ================================
-# 3. 自动清理 .config
+# 5. 自动清理 .config
 # ================================
-echo "[3] 自动清理 .config..."
+echo "[5] 自动清理 .config..."
 
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "❌ 未找到 .config：$CONFIG_FILE"
     exit 1
 fi
 
-BAD_PKGS=(
-  "asterisk"
-  "onionshare"
-  "pysocks"
-  "unidecode"
-  "uw-imap"
-)
-
-echo "清理以下不存在的包："
-printf '%s\n' "${BAD_PKGS[@]}"
-
+BAD_PKGS=( "asterisk" "onionshare" "pysocks" "unidecode" "uw-imap" )
 for pkg in "${BAD_PKGS[@]}"; do
     sed -i "/$pkg/d" "$CONFIG_FILE"
 done
 
-echo "验证清理结果..."
 for pkg in "${BAD_PKGS[@]}"; do
     if grep -q "$pkg" "$CONFIG_FILE"; then
         echo "❌ 清理失败：仍然存在 $pkg"
         exit 1
     fi
 done
-
 echo "✅ .config 已完全清理干净"
 
 # ================================
-# 4. 最终一致性检查
+# 6. 最终一致性检查
 # ================================
-echo "[4] 最终一致性检查..."
+echo "[6] 最终一致性检查..."
 
-if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl3000-emmc=y" "$CONFIG_FILE"; then
-    echo "❌ .config 未启用 SL3000 设备"
+if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_${DTS_NAME}=y" "$CONFIG_FILE"; then
+    echo "❌ .config 未启用设备：${DTS_NAME}"
     exit 1
 fi
 
