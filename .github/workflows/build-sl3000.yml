@@ -27,13 +27,6 @@ jobs:
           cp -f dts/mt7981-sl3000-emmc.dts openwrt/target/linux/mediatek/dts/mt7981-sl3000-emmc.dts
           cp -f config/sl3000.config openwrt/.config
 
-      - name: Ensure DTS Makefile exists
-        run: |
-          mkdir -p openwrt/target/linux/mediatek/dts
-          if [ ! -f openwrt/target/linux/mediatek/dts/Makefile ]; then
-            echo "DTS_MT7981 :=" > openwrt/target/linux/mediatek/dts/Makefile
-          fi
-
       - name: Register DTS
         run: |
           DTS_MK="openwrt/target/linux/mediatek/dts/Makefile"
@@ -54,7 +47,6 @@ jobs:
       - name: Verify kernel DTS sync
         run: |
           KDIR=$(find openwrt/build_dir -type d -path "*linux-mediatek_filogic*" | head -n 1)
-          echo "KDIR=$KDIR"
           if ! find "$KDIR/arch/arm64/boot/dts" -name "mt7981-sl3000-emmc.dts" | grep -q .; then
             echo "❌ 内核 DTS 未同步"
             exit 1
