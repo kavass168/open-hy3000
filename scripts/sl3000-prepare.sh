@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-echo "===== SL3000 构建前准备脚本（dry-run 预跑 + 自动检测 + 自动修复 + fail-fast）====="
+echo "===== SL3000 构建前准备脚本（dry-run + 自动检测 + 自动修复 + DTS 自动重命名 + fail-fast）====="
 
 CONFIG_FILE="openwrt/.config"
 MK_FILE="openwrt/target/linux/mediatek/image/filogic.mk"
@@ -104,7 +104,7 @@ done
 echo "✅ .config 已完全清理干净"
 
 # ================================
-# 6. dry-run：检测 OpenWrt 构建依赖
+# 6. dry-run：检测 OpenWrt 构建目录结构
 # ================================
 echo "[6] dry-run：检测 OpenWrt 构建依赖..."
 
@@ -125,17 +125,25 @@ done
 echo "✅ OpenWrt 目录结构完整"
 
 # ================================
-# 7. dry-run：检测 feeds 冲突
+# 7. dry-run：检测 feeds 冲突（增强版）
 # ================================
 echo "[7] dry-run：检测 feeds 冲突..."
 
-if grep -R "<<<<<<<" openwrt/package 2>/dev/null; then
+CONFLICT_FILES=$(grep -Rl "<<<<<<<" openwrt/package 2>/dev/null || true)
+
+if [ -n "$CONFLICT_FILES" ]; then
     echo "❌ feeds 存在合并冲突"
     echo "⚙️ 自动修复：清理冲突标记"
-    grep -Rl ">>>>>>>" openwrt/package | xargs sed -i '/<<<<<<<\|=======\|>>>>>>>/d'
-fi
 
-echo "✅ feeds 无冲突"
+    for f in $CONFLICT_FILES; do
+        echo "  → 修复冲突文件：$f"
+        sed -i '/<<<<<<<\|=======\|>>>>>>>/d' "$f"
+    done
+
+    echo "✅ 冲突标记已清理"
+else
+    echo "✅ feeds 无冲突"
+fi
 
 # ================================
 # 8. 最终一致性检查
