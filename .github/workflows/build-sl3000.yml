@@ -11,23 +11,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ============================================================
       # 0. Checkout
-      # ============================================================
       - name: Checkout SL3000 repo
         uses: actions/checkout@v4
 
-      # ============================================================
-      # 1. 安全版极限磁盘清理（不会破坏 OpenWrt 工具链）
-      # ============================================================
+      # 1. 安全版极限清理（不动 openwrt）
       - name: Safe aggressive disk cleanup
         run: |
-          echo "===== 清理 docker ====="
           docker ps -aq | xargs -r docker rm -f || true
           docker images -aq | xargs -r docker rmi -f || true
           docker system prune -af || true
 
-          echo "===== 清理大型 SDK / 语言运行时 ====="
           sudo rm -rf \
             /usr/share/dotnet \
             /usr/local/lib/android \
@@ -38,22 +32,13 @@ jobs:
             /usr/local/share/chromium \
             /usr/share/swift
 
-          echo "===== 清理语言缓存 ====="
-          sudo rm -rf \
-            $HOME/.cache/pip \
-            $HOME/.npm \
-            $HOME/.cargo \
-            $HOME/.cache
-
-          echo "===== 清理 apt 缓存 ====="
+          sudo rm -rf $HOME/.cache/pip $HOME/.npm $HOME/.cargo $HOME/.cache
           sudo apt-get clean
           sudo rm -rf /var/lib/apt/lists/*
 
           df -h
 
-      # ============================================================
-      # 2. 安装构建依赖 + ccache
-      # ============================================================
+      # 2. 依赖 + ccache
       - name: Install build deps
         run: |
           sudo apt-get update
@@ -73,9 +58,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-ccache-
 
-      # ============================================================
-      # 3. Clone ImmortalWrt + feeds
-      # ============================================================
+      # 3. Clone + feeds
       - name: Clone ImmortalWrt 25.12
         run: |
           git clone --branch openwrt-25.12 https://github.com/immortalwrt/immortalwrt.git openwrt
@@ -83,9 +66,7 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      # ============================================================
-      # 4. OpenWrt 多级缓存（dl / toolchain / staging_dir / hostpkg）
-      # ============================================================
+      # 4. OpenWrt 缓存
       - name: Cache OpenWrt dl
         uses: actions/cache@v4
         with:
@@ -116,30 +97,26 @@ jobs:
         uses: actions/cache@v4
         with:
           path: openwrt/staging_dir/hostpkg
-          key: ${{ runner.os }}-hostpkg-${{ hashFiles('config/sl3000.config') }}
-          restore-keys: |
-            ${{ runner.os }}-hostpkg-
+        key: ${{ runner.os }}-hostpkg-${{ hashFiles('config/sl3000.config') }}
+        restore-keys: |
+          ${{ runner.os }}-hostpkg-
 
-      # ============================================================
-      # 5. 应用 SL3000 专用文件
-      # ============================================================
+      # 5. 应用设备文件（自动检测 DTS 目录）
       - name: Apply SL3000 device files
         run: |
-          cp -f dts/mt7981-sl3000-emmc.dts openwrt/target/linux/mediatek/dts/mt7981-sl3000-emmc.dts
+          DTS_DIR=$(find openwrt/target/linux/mediatek -maxdepth 1 -type d -name "files-*" | head -n 1)/dts
+          echo "检测到 DTS 目录: $DTS_DIR"
+          cp -f dts/mt7981-sl3000-emmc.dts "$DTS_DIR/mt7981-sl3000-emmc.dts"
           cp -f image/filogic.mk openwrt/target/linux/mediatek/image/filogic.mk
           cp -f config/sl3000.config openwrt/.config
 
-      # ============================================================
-      # 6. 构建前 sanity check + .config 清理
-      # ============================================================
+      # 6. 构建前 sanity + 清理（fail-fast）
       - name: Prepare SL3000 (sanity + clean)
         run: |
           chmod +x scripts/sl3000-prepare.sh
           ./scripts/sl3000-prepare.sh
 
-      # ============================================================
       # 7. defconfig 校验
-      # ============================================================
       - name: Defconfig verify
         run: |
           cd openwrt
@@ -148,17 +125,13 @@ jobs:
           diff -u .config.before .config || true
           echo "defconfig 校验完成"
 
-      # ============================================================
-      # 8. ★ 强制构建 tools + toolchain（修复 m4 / gcc 缺失问题）
-      # ============================================================
+      # 8. 强制构建 tools + toolchain
       - name: Build tools and toolchain
         run: |
           cd openwrt
           make tools/install toolchain/install -j$(nproc) V=s
 
-      # ============================================================
       # 9. 预编译内核 + DTS 同步验证
-      # ============================================================
       - name: Prebuild kernel only
         run: |
           cd openwrt
@@ -167,15 +140,18 @@ jobs:
       - name: Verify kernel DTS sync
         run: |
           KDIR=$(find openwrt/build_dir -maxdepth 3 -type d -name "*linux-mediatek_filogic*" | head -n 1)
+          echo "KDIR = $KDIR"
+          if [ -z "$KDIR" ]; then
+            echo "❌ 未找到 mediatek_filogic 内核构建目录"
+            exit 1
+          fi
           if ! find "$KDIR/arch/arm64/boot/dts" -name "mt7981-sl3000-emmc.dts" | grep -q .; then
             echo "❌ DTS 未同步到 kernel"
             exit 1
           fi
           echo "✅ DTS 已同步到 kernel"
 
-      # ============================================================
-      # 10. 编译前再次安全清理（仍然不动 openwrt）
-      # ============================================================
+      # 10. 编译前安全清理（不动 openwrt）
       - name: Safe cleanup before build
         run: |
           docker system prune -af || true
@@ -184,9 +160,7 @@ jobs:
           sudo rm -rf /var/lib/apt/lists/*
           df -h
 
-      # ============================================================
-      # 11. 主构建（自动 fallback 到 -j1）
-      # ============================================================
+      # 11. 主构建（自动 fallback）
       - name: Build firmware (with fallback)
         run: |
           cd openwrt
@@ -196,9 +170,7 @@ jobs:
             make -j1 V=s
           fi
 
-      # ============================================================
-      # 12. 固件检查 + sha256
-      # ============================================================
+      # 12. 产物校验 + sha256
       - name: Ensure firmware exists
         run: |
           COUNT=$(find openwrt/bin/targets/mediatek/filogic -type f | wc -l)
@@ -213,9 +185,7 @@ jobs:
           cd openwrt/bin/targets/mediatek/filogic
           sha256sum * > sha256sum.txt
 
-      # ============================================================
       # 13. 自动发布 Release
-      # ============================================================
       - name: Create tag
         run: |
           git config user.name "github-actions"
