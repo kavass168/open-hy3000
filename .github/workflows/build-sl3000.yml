@@ -15,7 +15,7 @@ jobs:
       - name: Checkout SL3000 repo
         uses: actions/checkout@v4
 
-      # 1. 安全版极限磁盘清理（不动 openwrt）
+      # 1. 安全极限清理（不动 openwrt）
       - name: Safe aggressive disk cleanup
         run: |
           docker ps -aq | xargs -r docker rm -f || true
@@ -58,7 +58,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-ccache-
 
-      # 3. Clone + feeds
+      # 3. Clone ImmortalWrt + feeds
       - name: Clone ImmortalWrt 25.12
         run: |
           git clone --branch openwrt-25.12 https://github.com/immortalwrt/immortalwrt.git openwrt
@@ -101,12 +101,21 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-hostpkg-
 
-      # 5. 应用设备文件（自动检测 DTS 目录）
+      # 5. 应用 SL3000 设备文件（主 DTS + 兼容 DTS）
       - name: Apply SL3000 device files
         run: |
+          # 主 DTS 目录（始终存在）
+          cp -f dts/mt7981-sl3000-emmc.dts openwrt/target/linux/mediatek/dts/mt7981-sl3000-emmc.dts
+
+          # 兼容 files-6.x/dts，如果存在就复制
           DTS_DIR=$(find openwrt/target/linux/mediatek -maxdepth 1 -type d -name "files-*" | head -n 1)/dts
-          echo "检测到 DTS 目录: $DTS_DIR"
-          cp -f dts/mt7981-sl3000-emmc.dts "$DTS_DIR/mt7981-sl3000-emmc.dts"
+          if [ -d "$DTS_DIR" ]; then
+            echo "检测到 DTS 目录: $DTS_DIR"
+            cp -f dts/mt7981-sl3000-emmc.dts "$DTS_DIR/mt7981-sl3000-emmc.dts"
+          else
+            echo "未检测到 files-* DTS 目录，跳过兼容复制"
+          fi
+
           cp -f image/filogic.mk openwrt/target/linux/mediatek/image/filogic.mk
           cp -f config/sl3000.config openwrt/.config
 
@@ -125,7 +134,7 @@ jobs:
           diff -u .config.before .config || true
           echo "defconfig 校验完成"
 
-      # 8. 强制构建 tools + toolchain
+      # 8. 强制构建 tools + toolchain（修复 m4/gcc 缺失）
       - name: Build tools and toolchain
         run: |
           cd openwrt
