@@ -65,7 +65,7 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      # 4. OpenWrt 缓存（修复缩进）
+      # 4. OpenWrt 缓存
       - name: Cache OpenWrt dl
         uses: actions/cache@v4
         with:
@@ -100,25 +100,13 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-hostpkg-
 
-      # 5. 应用 SL3000 设备文件（主 DTS + 兼容 DTS）
+      # 5. 应用 SL3000 设备文件（prepare.sh 会自动重命名 DTS）
       - name: Apply SL3000 device files
         run: |
-          # 主 DTS 目录（始终存在）
-          cp -f dts/mt7981-sl3000-emmc.dts openwrt/target/linux/mediatek/dts/mt7981-sl3000-emmc.dts
-
-          # 兼容 files-6.x/dts，如果存在就复制一份
-          DTS_DIR=$(find openwrt/target/linux/mediatek -maxdepth 1 -type d -name "files-*" | head -n 1)/dts
-          if [ -d "$DTS_DIR" ]; then
-            echo "检测到 files-* DTS 目录: $DTS_DIR"
-            cp -f dts/mt7981-sl3000-emmc.dts "$DTS_DIR/mt7981-sl3000-emmc.dts"
-          else
-            echo "未检测到 files-* DTS 目录，跳过兼容复制"
-          fi
-
           cp -f image/filogic.mk openwrt/target/linux/mediatek/image/filogic.mk
           cp -f config/sl3000.config openwrt/.config
 
-      # 6. 构建前 sanity + 清理
+      # 6. 构建前 sanity + DTS 自动重命名 + 清理
       - name: Prepare SL3000 (sanity + clean)
         run: |
           chmod +x scripts/sl3000-prepare.sh
@@ -133,7 +121,7 @@ jobs:
           diff -u .config.before .config || true
           echo "defconfig 校验完成"
 
-      # 8. 强制构建 tools + toolchain（修复 m4/gcc 缺失）
+      # 8. 强制构建 tools + toolchain
       - name: Build tools and toolchain
         run: |
           cd openwrt
@@ -153,7 +141,7 @@ jobs:
             echo "❌ 未找到 mediatek_filogic 内核构建目录"
             exit 1
           fi
-          if ! find "$KDIR/arch/arm64/boot/dts" -name "mt7981-sl3000-emmc.dts" | grep -q .; then
+          if ! find "$KDIR/arch/arm64/boot/dts" -name "*.dts" | grep -q "mt7981"; then
             echo "❌ DTS 未同步到 kernel"
             exit 1
           fi
