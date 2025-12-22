@@ -35,7 +35,6 @@ jobs:
           sudo rm -rf $HOME/.cache/pip $HOME/.npm $HOME/.cargo $HOME/.cache
           sudo apt-get clean
           sudo rm -rf /var/lib/apt/lists/*
-
           df -h
 
       # 2. 安装依赖 + ccache
@@ -107,10 +106,10 @@ jobs:
           # 主 DTS 目录（始终存在）
           cp -f dts/mt7981-sl3000-emmc.dts openwrt/target/linux/mediatek/dts/mt7981-sl3000-emmc.dts
 
-          # 兼容 files-6.x/dts，如果存在就复制
+          # 兼容 files-6.x/dts，如果存在就复制一份
           DTS_DIR=$(find openwrt/target/linux/mediatek -maxdepth 1 -type d -name "files-*" | head -n 1)/dts
           if [ -d "$DTS_DIR" ]; then
-            echo "检测到 DTS 目录: $DTS_DIR"
+            echo "检测到 files-* DTS 目录: $DTS_DIR"
             cp -f dts/mt7981-sl3000-emmc.dts "$DTS_DIR/mt7981-sl3000-emmc.dts"
           else
             echo "未检测到 files-* DTS 目录，跳过兼容复制"
