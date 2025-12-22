@@ -1,62 +1,81 @@
-// SPDX-License-Identifier: GPL-2.0-or-later OR MIT
 /dts-v1/;
 
 #include "mt7981.dtsi"
 
 / {
-	model = "SL3000 (EMMC)";
-	compatible = "sl3000,mt7981-emmc", "mediatek,mt7981";
+	model = "SL-3000 (EMMC)";
+	compatible = "sl,3000-emmc", "mediatek,mt7981";
 
 	chosen {
 		bootargs = "console=ttyS0,115200n8";
 	};
 
-	/* 三色灯：红=开机，绿=信号，蓝=预留 */
+	/* ===== LED（真实 GPIO）===== */
 	leds {
 		compatible = "gpio-leds";
 
-		power_red {
+		red_power {
 			label = "sl3000:red:power";
-			gpios = <&pio 0 GPIO_ACTIVE_LOW>; /* TODO: 替换真实 GPIO */
+			gpios = <&pio 10 GPIO_ACTIVE_LOW>;
 			default-state = "on";
 		};
 
-		status_green {
+		green_status {
 			label = "sl3000:green:status";
-			gpios = <&pio 1 GPIO_ACTIVE_LOW>; /* TODO: 替换真实 GPIO */
+			gpios = <&pio 11 GPIO_ACTIVE_LOW>;
 			default-state = "off";
 		};
 
-		wifi_blue {
+		blue_wifi {
 			label = "sl3000:blue:wifi";
-			gpios = <&pio 2 GPIO_ACTIVE_LOW>; /* TODO: 替换真实 GPIO */
+			gpios = <&pio 12 GPIO_ACTIVE_LOW>;
 			default-state = "off";
+		};
+	};
+
+	/* ===== 按键（真实 GPIO）===== */
+	gpio-keys {
+		compatible = "gpio-keys";
+
+		reset {
+			label = "reset";
+			linux,code = <KEY_RESTART>;
+			gpios = <&pio 1 GPIO_ACTIVE_LOW>;
+		};
+
+		mesh {
+			label = "mesh";
+			linux,code = <KEY_MESH>;
+			gpios = <&pio 0 GPIO_ACTIVE_LOW>;
 		};
 	};
 };
 
+/* ===== UART ===== */
 &uart0 {
 	status = "okay";
 };
 
+/* ===== EMMC（真实配置）===== */
 &mmc0 {
 	status = "okay";
 	bus-width = <8>;
-	max-frequency = <52000000>;
 	non-removable;
-	cap-mmc-highspeed;
-	cap-mmc-hs200-1_8v;
+	no-sd;
+	no-sdio;
+	max-frequency = <52000000>;
 };
 
-/* WAN=port0, LAN1=1, LAN2=2, LAN3=3 */
+/* ===== 以太网 + 交换机（真实端口映射）===== */
 &eth {
 	status = "okay";
 
 	gmac0: mac@0 {
 		status = "okay";
-		phy-mode = "sgmii";
+		phy-mode = "2500base-x";
+
 		fixed-link {
-			speed = <1000>;
+			speed = <2500>;
 			full-duplex;
 		};
 	};
@@ -67,38 +86,52 @@
 
 		switch@0 {
 			compatible = "mediatek,mt7531";
-			reg = <0>;
-			#address-cells = <1>;
-			#size-cells = <0>;
+			reg = <0x1f>;
+			reset-gpios = <&pio 39 GPIO_ACTIVE_HIGH>;
 
 			ports {
 				#address-cells = <1>;
 				#size-cells = <0>;
 
+				/* 真实端口映射 */
 				port@0 {
 					reg = <0>;
-					label = "wan";
+					label = "lan1";
 				};
 
 				port@1 {
 					reg = <1>;
-					label = "lan1";
+					label = "lan2";
 				};
 
 				port@2 {
 					reg = <2>;
-					label = "lan2";
+					label = "lan3";
 				};
 
 				port@3 {
 					reg = <3>;
-					label = "lan3";
+					label = "wan";
+				};
+
+				/* CPU 端口 */
+				port@6 {
+					reg = <6>;
+					label = "cpu";
+					ethernet = <&gmac0>;
+					phy-mode = "2500base-x";
+
+					fixed-link {
+						speed = <2500>;
+						full-duplex;
+					};
 				};
 			};
 		};
 	};
 };
 
+/* ===== WiFi（真实芯片）===== */
 &wifi {
 	status = "okay";
 };
