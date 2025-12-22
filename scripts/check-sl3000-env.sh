@@ -1,48 +1,65 @@
-#!/bin/bash
+- name: Apply SL3000 device files (force overwrite)
+        run: |
+          cp -f image/filogic.mk openwrt/target/linux/mediatek/image/filogic.mk
+          cp -f dts/mt7981-sl3000-emmc.dts openwrt/target/linux/mediatek/dts/mt7981-sl3000-emmc.dts
+          cp -f config/sl3000.config openwrt/.config
 
-echo "=== SL3000 构建环境自检（openwrt/）开始 ==="
+      - name: Verify SL3000 configuration alignment
+        run: |
+          echo "===== 仓库名称检查 ====="
+          echo "当前仓库: ${GITHUB_REPOSITORY}"
+          if [ "${GITHUB_REPOSITORY}" != "ykm0595/sl3000" ]; then
+            echo "❌ 仓库名称不一致，应为 ykm0595/sl3000"
+            exit 1
+          fi
+          echo "✅ 仓库名称正确"
 
-ROOT="openwrt"
+          echo "===== 构建路径检查 ====="
+          pwd
+          if [[ "$(pwd)" != *"/sl3000" ]]; then
+            echo "❌ 构建路径不正确，应包含 sl3000"
+            exit 1
+          fi
+          echo "✅ 构建路径正确"
 
-# 1. 检查 filogic.mk
-if [ ! -f "$ROOT/target/linux/mediatek/image/filogic.mk" ]; then
-    echo "❌ 缺少 $ROOT/target/linux/mediatek/image/filogic.mk"
-    exit 1
-else
-    echo "✅ filogic.mk 存在"
-fi
+          echo "===== DTS 文件检查 ====="
+          if [ ! -f openwrt/target/linux/mediatek/dts/mt7981-sl3000-emmc.dts ]; then
+            echo "❌ DTS 文件不存在：mt7981-sl3000-emmc.dts"
+            exit 1
+          fi
+          echo "✅ DTS 文件存在"
 
-grep -q "Device/sl3000-emmc" "$ROOT/target/linux/mediatek/image/filogic.mk"
-if [ $? -ne 0 ]; then
-    echo "❌ filogic.mk 中没有 Device/sl3000-emmc 定义"
-    exit 1
-else
-    echo "✅ filogic.mk 中包含 Device/sl3000-emmc"
-fi
+          echo "===== filogic.mk DEVICE_DTS 检查 ====="
+          DTS_LINE=$(grep -E "DEVICE_DTS *:= *mt7981-sl3000-emmc" openwrt/target/linux/mediatek/image/filogic.mk || true)
+          if [ -z "$DTS_LINE" ]; then
+            echo "❌ filogic.mk 中 DEVICE_DTS 未对齐为 mt7981-sl3000-emmc"
+            exit 1
+          fi
+          echo "✅ filogic.mk DEVICE_DTS 对齐"
 
-# 2. 检查 DTS
-if [ ! -f "$ROOT/target/linux/mediatek/dts/mt7981-sl3000-emmc.dts" ]; then
-    echo "❌ 缺少 DTS：$ROOT/target/linux/mediatek/dts/mt7981-sl3000-emmc.dts"
-    exit 1
-else
-    echo "✅ DTS 文件存在"
-fi
+          echo "===== config DEVICE 检查 ====="
+          CFG_LINE=$(grep "CONFIG_TARGET_mediatek_filogic_DEVICE_sl3000-emmc=y" openwrt/.config || true)
+          if [ -z "$CFG_LINE" ]; then
+            echo "❌ config 中 DEVICE 未对齐为 sl3000-emmc"
+            exit 1
+          fi
+          echo "✅ config DEVICE 对齐"
 
-# 3. 检查 .config
-if [ ! -f "$ROOT/.config" ]; then
-    echo "❌ 缺少 $ROOT/.config（构建无法继续）"
-    exit 1
-else
-    echo "✅ .config 存在"
-fi
+          echo "===== DTS Makefile 注册检查 ====="
+          REG_LINE=$(grep "mt7981-sl3000-emmc.dts" openwrt/target/linux/mediatek/dts/Makefile || true)
+          if [ -z "$REG_LINE" ]; then
+            echo "❌ DTS 未注册到 Makefile"
+            exit 1
+          fi
+          echo "✅ DTS 注册正确"
 
-grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl3000-emmc=y" "$ROOT/.config"
-if [ $? -ne 0 ]; then
-    echo "❌ .config 未启用 SL3000"
-    exit 1
-else
-    echo "✅ .config 已启用 SL3000"
-fi
+          echo "===== 检查是否存在旧的 s13000 残留 ====="
+          BAD=$(grep -R "s13000" -n openwrt/target/linux/mediatek || true)
+          if [ ! -z "$BAD" ]; then
+            echo "❌ 检测到 s13000 残留："
+            echo "$BAD"
+            exit 1
+          fi
+          echo "✅ 没有 s13000 残留"
 
-echo "=== ✅ SL3000 构建环境自检通过（openwrt/）==="
-exit 0
+          echo "===== 全部检查通过，开始构建 ====="
