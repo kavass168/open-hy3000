@@ -23,21 +23,18 @@ jobs:
 
       - name: Apply SL3000 device files
         run: |
-          cp -f image/filogic.mk openwrt/target/linux/mediatek/image/filogic.mk
+          # 这里假设你仓库结构如下：
+          # dts/mt7981-sl3000-emmc.dts
+          # image/filogic.mk
+          # config/sl3000.config
           cp -f dts/mt7981-sl3000-emmc.dts openwrt/target/linux/mediatek/dts/mt7981-sl3000-emmc.dts
+          cp -f image/filogic.mk openwrt/target/linux/mediatek/image/filogic.mk
           cp -f config/sl3000.config openwrt/.config
 
-      - name: Register DTS
+      - name: Prepare SL3000 (sanity + clean)
         run: |
-          DTS_MK="openwrt/target/linux/mediatek/dts/Makefile"
-          if ! grep -q "mt7981-sl3000-emmc.dts" "$DTS_MK"; then
-            echo 'DTS_MT7981 += mt7981-sl3000-emmc.dts' >> "$DTS_MK"
-          fi
-
-      - name: Run SL3000 check script
-        run: |
-          chmod +x scripts/check-sl3000.sh
-          ./scripts/check-sl3000.sh
+          chmod +x scripts/sl3000-prepare.sh
+          ./scripts/sl3000-prepare.sh
 
       - name: Prebuild kernel only
         run: |
