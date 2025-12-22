@@ -14,6 +14,61 @@ jobs:
       - name: Checkout SL3000 repo
         uses: actions/checkout@v4
 
+      # ===== 磁盘清理：加强到极限 =====
+      - name: Aggressive disk cleanup
+        run: |
+          echo "===== 清理 docker ====="
+          docker ps -aq | xargs -r docker rm -f || true
+          docker images -aq | xargs -r docker rmi -f || true
+          docker system prune -af || true
+
+          echo "===== 清理常见大目录 ====="
+          sudo rm -rf \
+            /usr/share/dotnet \
+            /usr/local/lib/android \
+            /opt/ghc \
+            /opt/hostedtoolcache \
+            /usr/local/share/boost \
+            /usr/local/share/powershell \
+            /usr/local/share/chromium \
+            /usr/share/swift
+
+          echo "===== 清理语言/包管理缓存 ====="
+          sudo rm -rf \
+            $HOME/.cache/pip \
+            $HOME/.npm \
+            $HOME/.cargo \
+            $HOME/.yarn \
+            $HOME/.cache
+
+          echo "===== 清理 apt 缓存 ====="
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
+
+          echo "当前磁盘使用情况："
+          df -h
+
+      # ===== 安装构建依赖（含 ccache）=====
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential ccache libncurses5-dev libncursesw5-dev python3 rsync
+
+      # ===== ccache 配置 + 多级缓存 =====
+      - name: Setup ccache
+        run: |
+          echo "export CCACHE_DIR=${HOME}/.ccache" >> $GITHUB_ENV
+          echo "export CC='ccache gcc'" >> $GITHUB_ENV
+          echo "export CXX='ccache g++'" >> $GITHUB_ENV
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ${{ runner.os }}-ccache-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-ccache-
+
       - name: Clone ImmortalWrt 25.12
         run: |
           git clone --branch openwrt-25.12 https://github.com/immortalwrt/immortalwrt.git openwrt
@@ -21,21 +76,66 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
+      # ===== OpenWrt 多级缓存：dl / toolchain / staging_dir / hostpkg =====
+      - name: Cache OpenWrt dl
+        uses: actions/cache@v4
+        with:
+          path: openwrt/dl
+          key: ${{ runner.os }}-dl-${{ hashFiles('config/sl3000.config') }}
+          restore-keys: |
+            ${{ runner.os }}-dl-
+
+      - name: Cache OpenWrt toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            openwrt/staging_dir/toolchain-*
+          key: ${{ runner.os }}-toolchain-${{ hashFiles('config/sl3000.config') }}
+          restore-keys: |
+            ${{ runner.os }}-toolchain-
+
+      - name: Cache OpenWrt staging_dir
+        uses: actions/cache@v4
+        with:
+          path: |
+            openwrt/staging_dir/host
+            openwrt/staging_dir/target-*
+          key: ${{ runner.os }}-staging-${{ hashFiles('config/sl3000.config') }}
+          restore-keys: |
+            ${{ runner.os }}-staging-
+
+      - name: Cache OpenWrt hostpkg
+        uses: actions/cache@v4
+        with:
+          path: |
+            openwrt/staging_dir/hostpkg
+          key: ${{ runner.os }}-hostpkg-${{ hashFiles('config/sl3000.config') }}
+          restore-keys: |
+            ${{ runner.os }}-hostpkg-
+
+      # ===== 应用 SL3000 专用文件 =====
       - name: Apply SL3000 device files
         run: |
-          # 这里假设你仓库结构如下：
-          # dts/mt7981-sl3000-emmc.dts
-          # image/filogic.mk
-          # config/sl3000.config
           cp -f dts/mt7981-sl3000-emmc.dts openwrt/target/linux/mediatek/dts/mt7981-sl3000-emmc.dts
           cp -f image/filogic.mk openwrt/target/linux/mediatek/image/filogic.mk
           cp -f config/sl3000.config openwrt/.config
 
+      # ===== 构建前 sanity check + .config 清理（fail-fast）=====
       - name: Prepare SL3000 (sanity + clean)
         run: |
           chmod +x scripts/sl3000-prepare.sh
           ./scripts/sl3000-prepare.sh
 
+      # ===== defconfig 校验，避免隐式 menuconfig =====
+      - name: Defconfig verify
+        run: |
+          cd openwrt
+          cp .config .config.before
+          make defconfig
+          diff -u .config.before .config || true
+          echo "✅ defconfig 已执行（如有差异请在本地更新 sl3000.config）"
+
+      # ===== 预编译内核，确保 DTS 真进 kernel（fail-fast）=====
       - name: Prebuild kernel only
         run: |
           cd openwrt
@@ -43,31 +143,45 @@ jobs:
 
       - name: Verify kernel DTS sync
         run: |
-          KDIR=$(find openwrt/build_dir -type d -path "*linux-mediatek_filogic*" | head -n 1)
+          KDIR=$(find openwrt/build_dir -maxdepth 3 -type d -name "*linux-mediatek_filogic*" | head -n 1)
+          echo "KDIR = $KDIR"
+          if [ -z "$KDIR" ]; then
+            echo "❌ 未找到 mediatek_filogic 内核构建目录"
+            exit 1
+          fi
           if ! find "$KDIR/arch/arm64/boot/dts" -name "mt7981-sl3000-emmc.dts" | grep -q .; then
-            echo "❌ 内核 DTS 未同步"
+            echo "❌ 内核 DTS 未同步：mt7981-sl3000-emmc.dts 未出现在 kernel 构建目录"
             exit 1
           fi
           echo "✅ 内核 DTS 同步成功"
 
-      - name: Expand disk
+      # ===== 再次释放磁盘，给最终编译腾空间 =====
+      - name: Aggressive disk cleanup before build
         run: |
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache
-          sudo docker system prune -af || true
+          docker ps -aq | xargs -r docker rm -f || true
+          docker images -aq | xargs -r docker rmi -f || true
+          docker system prune -af || true
 
-      - name: Cache dl
-        uses: actions/cache@v4
-        with:
-          path: openwrt/dl
-          key: ${{ runner.os }}-dl-${{ github.run_id }}
-          restore-keys: |
-            ${{ runner.os }}-dl-
+          sudo rm -rf \
+            /usr/share/dotnet \
+            /usr/local/lib/android \
+            /opt/ghc \
+            /opt/hostedtoolcache
 
-      - name: Build firmware
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
+
+          df -h
+
+      # ===== 主构建：带自动 fallback 到 -j1 V=s =====
+      - name: Build firmware (with fallback)
         run: |
           cd openwrt
-          make defconfig
-          make -j$(nproc) V=s
+          echo "===== 尝试并行构建 ====="
+          if ! make -j$(nproc) V=s; then
+            echo "⚠️ 并行构建失败，回退到单线程 -j1 V=s"
+            make -j1 V=s
+          fi
 
       - name: List firmware
         run: |
@@ -87,19 +201,20 @@ jobs:
           cd openwrt/bin/targets/mediatek/filogic
           sha256sum * > sha256sum.txt
 
+      # ===== 自动打 Tag + Release =====
       - name: Create tag
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          TAG="v$(date +'%Y%m%d')-${{ github.run_number }}"
-          git tag $TAG
-          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }} $TAG
+          TAG="sl3000-$(date +'%Y%m%d-%H%M%S')-r${{ github.run_number }}"
+          git tag "$TAG"
+          git push "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}" "$TAG"
           echo "TAG=$TAG" >> $GITHUB_ENV
 
       - name: Release firmware
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
-          name: "SL3000 ${{ env.TAG }}"
+          name: "SL3000 Firmware ${ { env.TAG } }"
           files: |
             openwrt/bin/targets/mediatek/filogic/*
