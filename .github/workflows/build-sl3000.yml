@@ -21,11 +21,11 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Apply SL3000 device files
+      - name: Apply SL3000 device files (force overwrite)
         run: |
-          cp image/filogic.mk openwrt/target/linux/mediatek/image/
-          cp dts/mt7981-sl3000-emmc.dts openwrt/target/linux/mediatek/dts/
-          cp config/sl3000.config openwrt/.config
+          cp -f image/filogic.mk openwrt/target/linux/mediatek/image/filogic.mk
+          cp -f dts/mt7981-sl3000-emmc.dts openwrt/target/linux/mediatek/dts/mt7981-sl3000-emmc.dts
+          cp -f config/sl3000.config openwrt/.config
 
       - name: Register SL3000 DTS in mediatek dts Makefile
         run: |
@@ -33,6 +33,13 @@ jobs:
           if ! grep -q "mt7981-sl3000-emmc.dts" "$DTS_MK"; then
             echo 'DTS_MT7981 += mt7981-sl3000-emmc.dts' >> "$DTS_MK"
           fi
+
+      - name: Verify applied files
+        run: |
+          echo "===== filogic.mk 中的 DEVICE_DTS ====="
+          grep DEVICE_DTS openwrt/target/linux/mediatek/image/filogic.mk || true
+          echo "===== DTS 文件是否存在 ====="
+          ls -l openwrt/target/linux/mediatek/dts/mt7981-sl3000-emmc.dts || true
 
       - name: Expand disk space
         run: |
@@ -51,7 +58,6 @@ jobs:
         run: |
           cd openwrt
           make defconfig
-          # 失败就直接退出，让整个 job 标红
           make -j$(nproc) V=s
 
       - name: List firmware files
