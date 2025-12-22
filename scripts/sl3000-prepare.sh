@@ -146,13 +146,37 @@ else
 fi
 
 # ================================
-# 8. 最终一致性检查
+# 8. 最终一致性检查（按 Device profile 名，而不是 DTS 名）
 # ================================
 echo "[8] 最终一致性检查..."
 
-if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_${DTS_NAME}=y" "$CONFIG_FILE"; then
-    echo "❌ .config 未启用设备：${DTS_NAME}"
+DEVICE_PROFILE=$(
+  awk -v dts="$DTS_NAME" '
+    /^define Device\// {
+      sub(/^define Device\//, "", $2);
+      dev=$2
+    }
+    /DEVICE_DTS/ && $0 ~ dts {
+      print dev;
+      exit
+    }
+  ' "$MK_FILE"
+)
+
+if [ -z "$DEVICE_PROFILE" ]; then
+    echo "❌ 无法根据 DTS 名称找到对应的 Device profile（检查 filogic.mk）"
     exit 1
 fi
 
+echo "✅ 识别 Device profile：$DEVICE_PROFILE"
+
+CFG_SYM="CONFIG_TARGET_mediatek_filogic_DEVICE_${DEVICE_PROFILE}=y"
+
+if ! grep -q "^${CFG_SYM}" "$CONFIG_FILE"; then
+    echo "❌ .config 未启用设备：${DEVICE_PROFILE}"
+    echo "   期望存在：${CFG_SYM}"
+    exit 1
+fi
+
+echo "✅ .config 已启用设备：${DEVICE_PROFILE}"
 echo "===== 所有检查通过，SL3000 构建环境已准备完毕 ====="
