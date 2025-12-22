@@ -21,7 +21,7 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Apply SL3000 device files (force overwrite)
+      - name: Apply SL3000 device files
         run: |
           cp -f image/filogic.mk openwrt/target/linux/mediatek/image/filogic.mk
           cp -f dts/mt7981-sl3000-emmc.dts openwrt/target/linux/mediatek/dts/mt7981-sl3000-emmc.dts
@@ -31,11 +31,10 @@ jobs:
         run: |
           mkdir -p openwrt/target/linux/mediatek/dts
           if [ ! -f openwrt/target/linux/mediatek/dts/Makefile ]; then
-            echo "⚠️ DTS Makefile 不存在，创建最小版本"
             echo "DTS_MT7981 :=" > openwrt/target/linux/mediatek/dts/Makefile
           fi
 
-      - name: Register SL3000 DTS in DTS Makefile
+      - name: Register DTS
         run: |
           DTS_MK="openwrt/target/linux/mediatek/dts/Makefile"
           if ! grep -q "mt7981-sl3000-emmc.dts" "$DTS_MK"; then
@@ -57,12 +56,12 @@ jobs:
           KDIR=$(find openwrt/build_dir -type d -path "*linux-mediatek_filogic*" | head -n 1)
           echo "KDIR=$KDIR"
           if ! find "$KDIR/arch/arm64/boot/dts" -name "mt7981-sl3000-emmc.dts" | grep -q .; then
-            echo "❌ 内核 DTS 目录中不存在 mt7981-sl3000-emmc.dts"
+            echo "❌ 内核 DTS 未同步"
             exit 1
           fi
           echo "✅ 内核 DTS 同步成功"
 
-      - name: Expand disk space
+      - name: Expand disk
         run: |
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache
           sudo docker system prune -af || true
@@ -81,7 +80,7 @@ jobs:
           make defconfig
           make -j$(nproc) V=s
 
-      - name: List firmware files
+      - name: List firmware
         run: |
           find openwrt/bin/targets/mediatek/filogic -type f || true
 
@@ -89,10 +88,10 @@ jobs:
         run: |
           COUNT=$(find openwrt/bin/targets/mediatek/filogic -type f | wc -l)
           if [ "$COUNT" -eq 0 ]; then
-            echo "❌ 没有生成固件文件"
+            echo "❌ 未生成固件"
             exit 1
           fi
-          echo "✅ 找到 $COUNT 个固件文件"
+          echo "✅ 固件生成成功"
 
       - name: Generate sha256sum
         run: |
