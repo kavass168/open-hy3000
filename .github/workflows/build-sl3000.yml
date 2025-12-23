@@ -1,7 +1,7 @@
 name: Build SL3000
 
 on:
-  workflow_dispatch:   # 只手动触发，绝不自动构建
+  workflow_dispatch:
 
 jobs:
   build:
@@ -24,7 +24,7 @@ jobs:
         echo "After cleanup:"
         df -h
 
-    - name: Install build dependencies
+    - name: Install dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y build-essential clang flex bison g++ gawk gcc-multilib \
@@ -32,34 +32,32 @@ jobs:
           file wget python3 python3-pip ccache
 
     # —— 缓存加速 —— 
-    - name: Cache OpenWrt dl
+    - name: Cache dl
       uses: actions/cache@v4
       with:
         path: openwrt/dl
-        key: openwrt-dl-${{ hashFiles('.config') }}
-        restore-keys: |
-          openwrt-dl-
+        key: dl-${{ hashFiles('.config') }}
+        restore-keys: dl-
 
-    - name: Cache OpenWrt toolchain
+    - name: Cache toolchain
       uses: actions/cache@v4
       with:
         path: |
           openwrt/staging_dir
           openwrt/toolchain
-        key: openwrt-toolchain-${{ hashFiles('.config') }}
-        restore-keys: |
-          openwrt-toolchain-
+        key: tc-${{ hashFiles('.config') }}
+        restore-keys: tc-
 
-    # —— 拉取源码 —— 
-    - name: Clone ImmortalWrt source
+    # —— 拉取 ImmortalWrt 源码 —— 
+    - name: Clone ImmortalWrt
       run: |
         git clone https://github.com/immortalwrt/immortalwrt openwrt
         cd openwrt
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    # —— 三件套 —— 
-    - name: Copy SL3000 config / dts / mk
+    # —— 复制你的三件套（config / dts / mk）—— 
+    - name: Copy SL3000 config/dts/mk
       run: |
         cp -f .config openwrt/.config
         mkdir -p openwrt/target/linux/mediatek/dts
@@ -67,41 +65,37 @@ jobs:
         mkdir -p openwrt/target/linux/mediatek/image
         cp -f image/*.mk openwrt/target/linux/mediatek/image/
 
-    # —— 全功能 prepare.sh（自动修复 + 自动构建 + 错误捕获）—— 
-    - name: Run SL3000 full prepare + build
+    # —— 自动适配 + 自动修复 + 自动构建 —— 
+    - name: Run prepare.sh (全功能自动修复 + 自动构建)
       run: |
         chmod +x scripts/sl3000-prepare.sh
         ./scripts/sl3000-prepare.sh
 
-    # —— 上传错误日志 —— 
+    # —— 构建失败上传错误日志 —— 
     - name: Upload error log
       if: failure()
       uses: actions/upload-artifact@v4
       with:
-        name: sl3000-build-error
+        name: error-log
         path: openwrt/build-report/error.log
 
-    # —— 上传固件 —— 
+    # —— 构建成功上传固件 —— 
     - name: Upload firmware
       if: success()
       uses: actions/upload-artifact@v4
       with:
-        name: sl3000-firmware
+        name: firmware
         path: openwrt/bin/targets/**/*
 
     # —— 自动发布 Release —— 
-    - name: Auto Release
+    - name: Release
       if: success()
       uses: softprops/action-gh-release@v2
       with:
         tag_name: sl3000-$(date +'%Y%m%d-%H%M')
         name: SL3000 Firmware $(date +'%Y-%m-%d %H:%M')
         body: |
-          自动构建成功 ✔  
-          - 全功能 prepare.sh  
-          - 自动修复 DTS / image.mk / kernel include  
-          - 自动修复 package 依赖  
-          - 自动捕获错误日志  
-          - 缓存加速 + 磁盘优化  
-        files: |
-          openwrt/bin/targets/**/*
+          自动构建成功 ✔
+          - 全功能 prepare.sh 自动修复
+          - DTS / image.mk / kernel include 自动适配
+          - package 依赖自动修复
