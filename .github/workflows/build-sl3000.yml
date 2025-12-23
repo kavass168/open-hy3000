@@ -1,9 +1,7 @@
 name: Build SL3000
 
 on:
-  push:
-  pull_request:
-  workflow_dispatch:
+  workflow_dispatch:   # 只手动触发，绝不自动构建
 
 jobs:
   build:
@@ -35,7 +33,7 @@ jobs:
         mkdir -p openwrt/target/linux/mediatek/image
         cp -f image/*.mk openwrt/target/linux/mediatek/image/
 
-    - name: Run SL3000 prepare script
+    - name: Run SL3000 prepare script（全自动修复 + 错误捕获）
       run: |
         chmod +x scripts/sl3000-prepare.sh
         ./scripts/sl3000-prepare.sh
