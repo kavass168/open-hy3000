@@ -69,15 +69,21 @@ sed -i '/CONFIG_PACKAGE_backuppc/d' .config || true
 make defconfig || true
 
 # ============================
-# 6. gpio-button-hotplug 修复
+# 6. gpio-button-hotplug 修复补丁
 # ============================
-GPIO_PKG="$ROOT/package/kernel/gpio-button-hotplug"
-if [ -d "$GPIO_PKG" ]; then
-    log "检查 gpio-button-hotplug..."
-    sed -i '/EXTRA_DEPENDS/d' "$GPIO_PKG/Makefile" || true
-    sed -i '/PKG_SOURCE_VERSION/d' "$GPIO_PKG/Makefile" || true
+PATCH_SRC="../patches/gpio-button-hotplug"
+PATCH_DST="$ROOT/package/kernel/gpio-button-hotplug/patches"
+
+if [ -d "$ROOT/package/kernel/gpio-button-hotplug" ]; then
+    mkdir -p "$PATCH_DST"
+    if [ -f "$PATCH_SRC/001-fix-broadcast_uevent.patch" ]; then
+        log "应用 gpio-button-hotplug 修复补丁..."
+        cp "$PATCH_SRC/001-fix-broadcast_uevent.patch" "$PATCH_DST/"
+    else
+        log "未找到 gpio-button-hotplug 补丁文件，跳过"
+    fi
 else
-    log "gpio-button-hotplug 不存在，跳过"
+    log "gpio-button-hotplug 不存在，跳过补丁"
 fi
 
 # ============================
@@ -132,4 +138,4 @@ if ! make -j"$(nproc)"; then
 fi
 
 log "构建成功，固件已生成"
-exit 0
+exit 0here
