@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 set -e
 
-echo "===== SL3000 全链路构建准备脚本（自动检测 + 自动修复 + DTS 自动重命名 + fail-fast）====="
+echo "===== SL3000 全链路构建准备脚本（自动检测 + 自动修复 + DTS 自动重命名 + fail-fast + 错误捕获）====="
 
 CONFIG_FILE="openwrt/.config"
 MK_FILE="openwrt/target/linux/mediatek/image/filogic.mk"
 DTS_DIR_MAIN="openwrt/target/linux/mediatek/dts"
+
+REPORT_DIR="openwrt/build-report"
+mkdir -p "$REPORT_DIR"
+ERROR_LOG="$REPORT_DIR/error.log"
+BUILD_LOG="$REPORT_DIR/build.log"
 
 # ================================
 # [fix] 修复官方 image.mk 中的错误 DTS 名称（方案 A）
@@ -14,10 +19,7 @@ echo "[fix] 修复官方 image.mk 中的错误 DTS 名称..."
 
 IMAGE_MK="openwrt/target/linux/mediatek/image/filogic.mk"
 
-# 修复错误的 DTS 文件名（s13000 → sl3000）
 sed -i 's/image-mt7981-s13000-emmc.dts/image-mt7981-sl3000-emmc.dts/g' "$IMAGE_MK"
-
-# 修复错误的 profile 名（s13000-emmc → sl3000-emmc）
 sed -i 's/s13000-emmc/sl3000-emmc/g' "$IMAGE_MK"
 
 echo "[fix] image.mk DTS 名称修复完成"
@@ -188,4 +190,29 @@ if ! grep -q "^${CFG_SYM}" "$CONFIG_FILE"; then
 fi
 
 echo "✅ .config 已启用设备：${DEVICE_PROFILE}"
+
 echo "===== 所有检查通过，SL3000 构建环境已准备完毕 ====="
+
+# ================================
+# 9. 捕获构建错误（核心增强）
+# ================================
+echo "[9] 捕获构建错误（自动生成错误报告）..."
+
+# 运行构建并捕获日志
+(
+  cd openwrt
+  make -j$(nproc)
+) 2>&1 | tee "$BUILD_LOG"
+
+# 如果构建失败，提取错误行
+if [ "${PIPESTATUS[0]}" != "0" ]; then
+    echo "❌ 构建失败，正在生成错误报告..."
+
+    grep -iE "error|failed|fatal" "$BUILD_LOG" > "$ERROR_LOG" || true
+
+    echo "===== 构建失败，错误报告已生成 ====="
+    echo "错误日志路径：$ERROR_LOG"
+    exit 1
+fi
+
+echo "===== 构建成功 ====="
