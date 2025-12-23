@@ -52,11 +52,52 @@ jobs:
       run: |
         git clone https://github.com/immortalwrt/immortalwrt openwrt
 
-    # —— 执行你的终极自动修复脚本 —— 
+    # —— 执行 prepare.sh —— 
     - name: Run SL3000 auto-prepare
       run: |
         chmod +x scripts/sl3000-prepare.sh
         ./scripts/sl3000-prepare.sh
+
+    # —— 自动修复逻辑 —— 
+    - name: Build with auto-repair
+      run: |
+        # 自动修复工具链
+        make tools/compile -j1 V=s || {
+          echo "⚠️ 工具链编译失败，自动清理并重试..."
+          rm -rf build_dir/host/stamp tools/stamp staging_dir/host/stamp
+          make tools/compile -j1 V=s
+        }
+
+        # 自动修复 dl 下载失败
+        make download -j8 || {
+          echo "⚠️ dl 下载失败，自动清理并重试..."
+          rm -rf dl/*
+          make download -j8
+        }
+
+        # 自动修复 feeds 安装失败
+        ./scripts/feeds update -a || true
+        ./scripts/feeds install -a || true
+
+        # fail-fast + 日志收集
+        timeout 1200 make -j1 V=s | tee build.log || {
+          echo "❌ 构建失败，收集错误日志..."
+          tail -n 200 build.log > error.log || echo "无 build.log" > error.log
+          tail -n 50 build.log
+          exit 1
+        }
+
+        # 自动修复磁盘空间不足
+        df -h
+        USED=$(df -h | awk '$NF=="/"{print $5}' | sed 's/%//')
+        if [ "$USED" -gt 90 ]; then
+          echo "⚠️ 磁盘空间不足，自动清理..."
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache
+          df -h
+        fi
+
+        # 查看 ccache 状态
+        ccache -s || true
 
     # —— 构建失败上传日志 —— 
     - name: Upload error log
@@ -84,7 +125,7 @@ jobs:
         body: |
           自动构建成功 ✔
           - 全自动修复（DTS / image.mk / kernel include / feeds / package / 路径）
-          - 使用终极版 sl3000-prepare.sh
+          - 科学上网支持（Passwall2 + 常见代理内核）
           - 磁盘优化 + 缓存加速
         files: |
           openwrt/bin/targets/**/*
