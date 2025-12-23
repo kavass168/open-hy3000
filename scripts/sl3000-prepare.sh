@@ -1,9 +1,6 @@
 #!/bin/bash
 set -e
 
-# ============================
-# 基础路径与日志
-# ============================
 ROOT="$(pwd)/openwrt"
 REPORT_DIR="$ROOT/build-report"
 LOG="$REPORT_DIR/error.log"
@@ -35,131 +32,109 @@ mkdir -p "$ROOT/target/linux/mediatek/dts"
 mkdir -p "$ROOT/target/linux/mediatek/image"
 
 # ============================
-# 1. 复制三件套（按你仓库路径）
+# 1. 复制三件套
 # ============================
 log "复制 SL3000 三件套..."
 
-# 1.1 config
-if [ -f "config/sl3000.config" ]; then
-    cp -f "config/sl3000.config" "$ROOT/.config"
-    log "已复制 config/sl3000.config -> openwrt/.config"
-else
-    err "缺少 config/sl3000.config"
-fi
-
-# 1.2 DTS
-if ls dts/*.dts >/dev/null 2>&1; then
-    cp -f dts/*.dts "$ROOT/target/linux/mediatek/dts/"
-    log "已复制 dts/*.dts -> target/linux/mediatek/dts/"
-else
-    err "缺少 dts/*.dts"
-fi
-
-# 1.3 image.mk
-if ls image/*.mk >/dev/null 2>&1; then
-    cp -f image/*.mk "$ROOT/target/linux/mediatek/image/"
-    log "已复制 image/*.mk -> target/linux/mediatek/image/"
-else
-    err "缺少 image/*.mk"
-fi
+cp -f config/sl3000.config "$ROOT/.config" || err "缺少 config/sl3000.config"
+cp -f dts/*.dts "$ROOT/target/linux/mediatek/dts/" || err "缺少 dts/*.dts"
+cp -f image/*.mk "$ROOT/target/linux/mediatek/image/" || err "缺少 image/*.mk"
 
 # ============================
-# 2. DTS 自动修复
+# 2. 自动识别 DTS 文件
 # ============================
-DTS="$ROOT/target/linux/mediatek/dts/mt7981b-sl3000-emmc.dts"
-if [ -f "$DTS" ]; then
-    log "检查 DTS: $(basename "$DTS")"
-    # 常见 SoC 兼容字段修正
+log "自动识别 DTS 文件..."
+
+DTS_FILE=$(ls "$ROOT/target/linux/mediatek/dts/" | grep -E "sl3000|s13000|7981" | head -n 1)
+
+if [ -z "$DTS_FILE" ]; then
+    err "未找到 SL3000 DTS 文件，请检查 dts 目录"
+else
+    DTS="$ROOT/target/linux/mediatek/dts/$DTS_FILE"
+    log "检测到 DTS 文件: $DTS_FILE"
     sed -i 's/mediatek,mt7981/mediatek,mt7981b/g' "$DTS" || true
-else
-    err "DTS 不存在: $DTS"
 fi
 
 # ============================
-# 3. image.mk 自动修复/检查
+# 3. image.mk 自动修复
 # ============================
 MK="$ROOT/target/linux/mediatek/image/filogic.mk"
 if [ -f "$MK" ]; then
-    log "检查 image.mk: filogic.mk 中的 sl3000 定义"
-    if ! grep -q "sl3000" "$MK"; then
-        err "image.mk 未包含 sl3000 定义，请检查 filogic.mk 内机型段"
-    fi
+    log "检查 image.mk..."
+    grep -q "sl3000" "$MK" || err "image.mk 未包含 sl3000 定义"
 else
     err "image.mk 不存在: $MK"
 fi
 
 # ============================
-# 4. kernel include 兼容修复
+# 4. kernel include 修复
 # ============================
 INC="$ROOT/include/kernel-defaults.mk"
 if [ -f "$INC" ]; then
-    log "检查 kernel-defaults.mk..."
-    # 某些版本中 CONFIG_KERNEL_ 前缀变动时的兼容处理
+    log "修复 kernel-defaults.mk..."
     sed -i 's/CONFIG_KERNEL_/CONFIG_/g' "$INC" || true
 fi
 
 # ============================
-# 5. feeds & package 依赖修复
+# 5. feeds & package 自动修复
 # ============================
 log "开始 feeds & package 自动修复..."
 cd "$ROOT"
 
-# 5.1 feeds update/install 容错
+# feeds update/install 容错
 for i in 1 2; do
-    log "feeds update -a (第 $i 次尝试)..."
-    ./scripts/feeds update -a && break || sleep 5
-done || log "feeds update 可能部分失败，继续尝试后续步骤"
+    ./scripts/feeds update -a && break || sleep 3
+done
 
 for i in 1 2; do
-    log "feeds install -a (第 $i 次尝试)..."
-    ./scripts/feeds install -a && break || sleep 5
-done || log "feeds install 可能部分失败，继续尝试后续步骤"
+    ./scripts/feeds install -a && break || sleep 3
+done
 
-# 5.2 触发 defconfig，让缺失包尽可能自动对齐
-log "执行 make defconfig 进行配置自愈..."
+# 自动禁用不存在依赖的包
+log "清理不存在依赖的包..."
+BAD_PKGS=(
+    "uw-imap"
+    "python3-pysocks"
+    "python3-unidecode"
+)
+for p in "${BAD_PKGS[@]}"; do
+    sed -i "/$p/d" .config || true
+done
+
+# 自动禁用循环依赖包 backuppc
+sed -i '/CONFIG_PACKAGE_backuppc/d' .config || true
+
+# 触发 defconfig
+log "执行 make defconfig..."
 make defconfig || true
 
-# 5.3 常见插件自动安装（如有）
-log "尝试自动安装常见插件（如存在于 feeds 中）..."
+# ============================
+# 6. 常见插件自动安装
+# ============================
+log "自动安装常见插件..."
+
 COMMON_PKGS=(
     "luci"
     "luci-compat"
-    "luci-app-passwall2"
     "luci-app-dockerman"
     "docker"
 )
 for p in "${COMMON_PKGS[@]}"; do
-    if ! grep -q "$p" .config 2>/dev/null; then
-        continue
+    if grep -q "$p" .config; then
+        log "尝试安装 $p..."
+        ./scripts/feeds install "$p" || true
     fi
-    log "检测到配置中包含 $p，尝试自动安装..."
-    ./scripts/feeds install "$p" || log "安装 $p 失败，略过"
 done
 
 # ============================
-# 6. 常见路径 / 目标自愈
+# 7. 上游变更提示
 # ============================
-log "检查常见路径与目标目录..."
-mkdir -p "$ROOT/bin/targets"
-mkdir -p "$ROOT/build_dir"
-mkdir -p "$ROOT/tmp"
-
-# ============================
-# 7. 上游 DTS/image 变更提示（只提示，不乱改）
-# ============================
-log "检查 DTS/image 是否有上游改动痕迹（提示级）..."
+log "检查 DTS/image 上游变更（提示级）..."
 
 UP_DTS_REF="$ROOT/target/linux/mediatek/dts/mt7981b-rfb.dts"
 if [ -f "$UP_DTS_REF" ]; then
     if ! diff -q "$UP_DTS_REF" "$DTS" >/dev/null 2>&1; then
-        log "提示：sl3000 DTS 与上游参考 DTS 有差异，建议手动 review 一次。"
-    fi
-fi
-
-UP_MK_REF="$ROOT/target/linux/mediatek/image/filogic.mk"
-if [ -f "$UP_MK_REF" ]; then
-    if ! grep -q "sl3000" "$UP_MK_REF"; then
-        log "提示：上游 filogic.mk 可能更新，sl3000 段落请保持关注。"
+        log "提示：上游 DTS 有更新，建议 review"
     fi
 fi
 
@@ -169,14 +144,11 @@ fi
 log "开始最终构建固件..."
 cd "$ROOT"
 
-# 再跑一次 defconfig，保证前面变更已收敛
 make defconfig
-
-# 真正构建
-if ! make -j"$(nproc)"; then
-    err "构建失败，具体请查看 $LOG 与 build_dir 内日志"
+make -j"$(nproc)" || {
+    err "构建失败，请查看 $LOG"
     exit 1
-fi
+}
 
-log "构建成功，固件已生成在 openwrt/bin/targets 下"
+log "构建成功，固件已生成"
 exit 0
