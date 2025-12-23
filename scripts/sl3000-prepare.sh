@@ -78,7 +78,9 @@ if [ -d "$ROOT/package/kernel/gpio-button-hotplug" ]; then
     mkdir -p "$PATCH_DST"
     if [ -f "$PATCH_SRC/001-fix-broadcast_uevent.patch" ]; then
         log "应用 gpio-button-hotplug 修复补丁..."
+        # 强制覆盖，确保路径正确
         cp "$PATCH_SRC/001-fix-broadcast_uevent.patch" "$PATCH_DST/"
+        log "补丁已复制到 $PATCH_DST"
     else
         log "未找到 gpio-button-hotplug 补丁文件，跳过"
     fi
@@ -138,4 +140,4 @@ if ! make -j"$(nproc)"; then
 fi
 
 log "构建成功，固件已生成"
-exit 0here
+exit 0
