@@ -14,14 +14,11 @@ jobs:
     # —— 磁盘优化 —— 
     - name: Free disk space
       run: |
-        echo "Before cleanup:"
-        df -h
         sudo rm -rf /usr/local/lib/android
         sudo rm -rf /usr/share/dotnet
         sudo rm -rf /opt/ghc
         sudo rm -rf /opt/hostedtoolcache
         sudo docker system prune -af || true
-        echo "After cleanup:"
         df -h
 
     - name: Install dependencies
@@ -36,7 +33,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: openwrt/dl
-        key: dl-${{ hashFiles('.config') }}
+        key: dl-${{ hashFiles('config/sl3000.config') }}
         restore-keys: dl-
 
     - name: Cache toolchain
@@ -45,10 +42,10 @@ jobs:
         path: |
           openwrt/staging_dir
           openwrt/toolchain
-        key: tc-${{ hashFiles('.config') }}
+        key: tc-${{ hashFiles('config/sl3000.config') }}
         restore-keys: tc-
 
-    # —— 拉取 ImmortalWrt 源码 —— 
+    # —— 拉取 ImmortalWrt —— 
     - name: Clone ImmortalWrt
       run: |
         git clone https://github.com/immortalwrt/immortalwrt openwrt
@@ -56,17 +53,15 @@ jobs:
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    # —— 复制你的三件套（config / dts / mk）—— 
+    # —— 复制三件套（严格按你仓库路径）—— 
     - name: Copy SL3000 config/dts/mk
       run: |
-        cp -f .config openwrt/.config
-        mkdir -p openwrt/target/linux/mediatek/dts
+        cp -f config/sl3000.config openwrt/.config
         cp -f dts/*.dts openwrt/target/linux/mediatek/dts/
-        mkdir -p openwrt/target/linux/mediatek/image
         cp -f image/*.mk openwrt/target/linux/mediatek/image/
 
     # —— 自动适配 + 自动修复 + 自动构建 —— 
-    - name: Run prepare.sh (全功能自动修复 + 自动构建)
+    - name: Run prepare.sh
       run: |
         chmod +x scripts/sl3000-prepare.sh
         ./scripts/sl3000-prepare.sh
@@ -96,6 +91,9 @@ jobs:
         name: SL3000 Firmware $(date +'%Y-%m-%d %H:%M')
         body: |
           自动构建成功 ✔
-          - 全功能 prepare.sh 自动修复
-          - DTS / image.mk / kernel include 自动适配
-          - package 依赖自动修复
+          - 自动适配 config/sl3000.config
+          - 自动修复 DTS / image.mk / kernel include
+          - 自动修复 package 依赖
+          - 磁盘优化 + 缓存加速
+        files: |
+          openwrt/bin/targets/**/*
