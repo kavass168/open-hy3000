@@ -152,13 +152,18 @@ echo "[8] 最终一致性检查..."
 
 DEVICE_PROFILE=$(
   awk -v dts="$DTS_NAME" '
-    /^define Device\// {
-      sub(/^define Device\//, "", $2);
-      dev=$2
+    # 记录当前的 Device profile，行可能有缩进
+    /^[[:space:]]*define Device\// {
+      if (match($0, /Device\/[A-Za-z0-9_-]+/)) {
+        dev = substr($0, RSTART + 7, RLENGTH - 7)
+      }
     }
+    # 当遇到包含当前 DTS 的 DEVICE_DTS 行时，输出对应的 profile
     /DEVICE_DTS/ && $0 ~ dts {
-      print dev;
-      exit
+      if (dev != "") {
+        print dev
+        exit
+      }
     }
   ' "$MK_FILE"
 )
@@ -171,6 +176,7 @@ fi
 echo "✅ 识别 Device profile：$DEVICE_PROFILE"
 
 CFG_SYM="CONFIG_TARGET_mediatek_filogic_DEVICE_${DEVICE_PROFILE}=y"
+echo "预期 .config 中应存在：${CFG_SYM}"
 
 if ! grep -q "^${CFG_SYM}" "$CONFIG_FILE"; then
     echo "❌ .config 未启用设备：${DEVICE_PROFILE}"
