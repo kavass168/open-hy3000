@@ -8,11 +8,9 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    # 1. Checkout 仓库
     - name: Checkout repo
       uses: actions/checkout@v4
 
-    # 2. 最大化释放磁盘空间
     - name: Free disk space
       run: |
         sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache
@@ -20,7 +18,6 @@ jobs:
         sudo apt clean
         df -h
 
-    # 3. 安装构建依赖（补充 perl/pkg-config/libelf-dev）
     - name: Install dependencies
       run: |
         sudo apt update
@@ -28,7 +25,6 @@ jobs:
           gettext git libncurses5-dev libssl-dev python3-distutils rsync unzip zlib1g-dev \
           file wget python3 python3-pip ccache perl pkg-config libelf-dev
 
-    # 4. dl 缓存（安全，不缓存 toolchain）
     - name: Cache dl
       uses: actions/cache@v4
       with:
@@ -36,19 +32,16 @@ jobs:
         key: dl-${{ runner.os }}
         restore-keys: dl-
 
-    # 5. 克隆 ImmortalWrt 24.10
     - name: Clone ImmortalWrt
       run: |
         git clone --depth=1 https://github.com/immortalwrt/immortalwrt.git \
           -b openwrt-24.10 /home/runner/immortalwrt
 
-    # 6. 固定脚本名称（改为 sl3000-prepare.sh）
     - name: Prepare SL3000
       run: |
         chmod +x scripts/sl3000-prepare.sh
         ./scripts/sl3000-prepare.sh
 
-    # 7. 构建固件（自动修复工具链/dl/feeds/磁盘 + fail-fast + 日志收集）
     - name: Build firmware
       run: |
         cd /home/runner/immortalwrt
@@ -58,25 +51,21 @@ jobs:
 
         make defconfig
 
-        # 自动修复工具链
         make tools/compile -j1 V=s || {
           echo "⚠️ 工具链编译失败，自动清理并重试..."
           rm -rf build_dir/host/stamp tools/stamp staging_dir/host/stamp
           make tools/compile -j1 V=s
         }
 
-        # 自动修复 dl 下载失败
         make download -j8 || {
           echo "⚠️ dl 下载失败，自动清理并重试..."
           rm -rf dl/*
           make download -j8
         }
 
-        # 自动修复 feeds 安装失败
         ./scripts/feeds update -a || true
         ./scripts/feeds install -a || true
 
-        # fail-fast + 日志收集
         timeout 1200 make -j1 V=s | tee build.log || {
           echo "❌ 构建失败，收集错误日志..."
           tail -n 200 build.log > error.log || echo "无 build.log" > error.log
@@ -84,7 +73,6 @@ jobs:
           exit 1
         }
 
-        # 自动修复磁盘空间不足
         df -h
         USED=$(df -h | awk '$NF=="/"{print $5}' | sed 's/%//')
         if [ "$USED" -gt 90 ]; then
@@ -95,7 +83,6 @@ jobs:
 
         ccache -s || true
 
-    # 8. 构建失败 → 上传错误日志
     - name: Upload error log
       if: failure()
       uses: actions/upload-artifact@v4
@@ -103,7 +90,6 @@ jobs:
         name: error-log
         path: error.log
 
-    # 9. 构建成功 → 上传固件
     - name: Upload firmware
       if: success()
       uses: actions/upload-artifact@v4
@@ -111,7 +97,6 @@ jobs:
         name: firmware
         path: /home/runner/immortalwrt/bin/targets/*/*/*
 
-    # 10. 构建成功 → 发布 Release
     - name: Release firmware
       if: success()
       uses: softprops/action-gh-release@v2
