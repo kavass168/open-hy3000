@@ -49,34 +49,55 @@ jobs:
         set -x
         ROOT="$(pwd)/openwrt"
 
-        # 复制三件套
+        echo "[INFO] 复制三件套"
         cp config/sl3000.config "$ROOT/.config"
         cp dts/*.dts "$ROOT/target/linux/mediatek/dts/"
         cp image/*.mk "$ROOT/target/linux/mediatek/image/"
 
-        # 注册 DTS
-        DTS_NAME=$(basename $(ls "$ROOT/target/linux/mediatek/dts/mt7981*-sl3000*.dts" | head -n1))
-        MAKEFILE="$ROOT/target/linux/mediatek/Makefile"
-        grep -q "$DTS_NAME" "$MAKEFILE" || echo "dts-\$(CONFIG_TARGET_mediatek_filogic) += $DTS_NAME" >> "$MAKEFILE"
+        echo "[INFO] 自动检测 DTS 文件"
+        DTS_FILE=""
+        for f in "$ROOT/target/linux/mediatek/dts"/mt7981*-sl3000*.dts; do
+          if [ -f "$f" ]; then
+            DTS_FILE="$f"
+            break
+          fi
+        done
 
-        # 校验 image.mk
+        if [ -z "$DTS_FILE" ]; then
+          echo "[ERROR] 未找到 SL3000 DTS 文件"
+          ls -l "$ROOT/target/linux/mediatek/dts"
+          exit 1
+        fi
+
+        DTS_NAME="$(basename "$DTS_FILE")"
+        MAKEFILE="$ROOT/target/linux/mediatek/Makefile"
+
+        if ! grep -q "$DTS_NAME" "$MAKEFILE"; then
+          echo "dts-\$(CONFIG_TARGET_mediatek_filogic) += $DTS_NAME" >> "$MAKEFILE"
+          echo "[INFO] 已注册 DTS: $DTS_NAME"
+        else
+          echo "[INFO] DTS 已存在: $DTS_NAME"
+        fi
+
+        echo "[INFO] 校验 image.mk"
         MK="$ROOT/target/linux/mediatek/image/filogic.mk"
-        grep -q "Device/sl3000" "$MK" || echo "[ERROR] filogic.mk 未包含 Device/sl3000 定义"
-        grep -q "TARGET_DEVICES += sl3000" "$MK" || echo "[ERROR] filogic.mk 未添加 sl3000 到 TARGET_DEVICES"
+        grep -q "Device/sl3000" "$MK" || echo "[ERROR] filogic.mk 缺少 Device/sl3000"
+        grep -q "TARGET_DEVICES += sl3000" "$MK" || echo "[ERROR] filogic.mk 缺少 TARGET_DEVICES += sl3000"
 
         cd "$ROOT"
 
-        # feeds 修复 + 冲突包清理
+        echo "[INFO] feeds 修复"
         ./scripts/feeds update -a || true
         ./scripts/feeds install -a || true
         sed -i '/uw-imap/d;/python3-pysocks/d;/python3-unidecode/d;/CONFIG_PACKAGE_backuppc/d' .config || true
 
         make defconfig || true
 
-        # gpio-button-hotplug 补丁检测
+        echo "[INFO] 自动修复 gpio-button-hotplug 补丁"
         PATCH_FILE="../patches/gpio-button-hotplug/001-fix-broadcast_uevent.patch"
         PKG_DIR="package/kernel/gpio-button-hotplug"
         PATCH_DST="$PKG_DIR/patches"
+
         if [ -d "$PKG_DIR" ] && [ -f "$PATCH_FILE" ]; then
           make package/kernel/gpio-button-hotplug/{clean,prepare} V=s || true
           SRC_DIR=$(find build_dir/target-*/linux-*/gpio-button-hotplug -maxdepth 0 | head -n1)
@@ -84,11 +105,12 @@ jobs:
             if patch --dry-run -p1 -d "$SRC_DIR" < "$PATCH_FILE" >/dev/null 2>&1; then
               mkdir -p "$PATCH_DST"
               cp "$PATCH_FILE" "$PATCH_DST/"
+              echo "[INFO] 已应用 gpio-button-hotplug 补丁"
             fi
           fi
         fi
 
-        # 科学上网配置注入
+        echo "[INFO] 注入科学上网配置"
         grep -q "CONFIG_PACKAGE_luci-app-passwall2=y" .config || cat >> .config <<EOF
         CONFIG_PACKAGE_luci-app-passwall2=y
         CONFIG_PACKAGE_passwall2=y
@@ -109,11 +131,11 @@ jobs:
         CONFIG_PACKAGE_libustream-openssl=y
         EOF
 
-        # config 校验修复
+        echo "[INFO] config 校验修复"
         grep -q "CONFIG_TARGET_mediatek=y" .config || echo "CONFIG_TARGET_mediatek=y" >> .config
         grep -q "CONFIG_TARGET_mediatek_filogic=y" .config || echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
 
-        # Makefile include 修复
+        echo "[INFO] Makefile include 修复"
         IMG_MAKE="target/linux/mediatek/image/Makefile"
         grep -q "filogic.mk" "$IMG_MAKE" || echo "include ./filogic.mk" >> "$IMG_MAKE"
 
@@ -126,13 +148,13 @@ jobs:
 
         make defconfig
 
-        # 工具链修复
+        echo "[INFO] 工具链自动修复"
         make tools/compile -j1 V=s || {
           rm -rf build_dir/host/stamp tools/stamp staging_dir/host/stamp
           make tools/compile -j1 V=s
         }
 
-        # dl 下载修复
+        echo "[INFO] dl 下载自动修复"
         make download -j8 || {
           rm -rf dl/*
           make download -j8
@@ -141,13 +163,13 @@ jobs:
         ./scripts/feeds update -a || true
         ./scripts/feeds install -a || true
 
-        # 构建失败自动重试
+        echo "[INFO] 构建固件（失败自动重试）"
         timeout 1200 make -j1 V=s || {
           echo "[WARN] 构建失败，自动重试一次..."
           timeout 1200 make -j1 V=s
         }
 
-        # 磁盘爆满 fail-fast
+        echo "[INFO] 磁盘空间检查"
         df -h
         USED=$(df -h | awk '$NF=="/"{print $5}' | sed 's/%//')
         if [ "$USED" -gt 90 ]; then
@@ -174,8 +196,7 @@ jobs:
         body: |
           自动构建固件（SL3000 / OpenWrt 25.12）
           - 构建编号：${{ github.run_number }}
-          - 缓存：dl / ccache
-          - 自动修复：工具链 / dl / feeds / 补丁 / 科学上网 / config / Makefile / 磁盘 / 重试
+          - 自动修复：工具链 / dl / feeds / 补丁 / 科学上网 / config / Makefile / DTS / 磁盘 / 重试
         files: openwrt/bin/targets/*/*/*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
