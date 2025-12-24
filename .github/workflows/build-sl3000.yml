@@ -28,14 +28,14 @@ jobs:
     - name: Cache dl
       uses: actions/cache@v4
       with:
-        path: /home/runner/immortalwrt/dl
+        path: openwrt/dl
         key: dl-${{ runner.os }}
         restore-keys: dl-
 
     - name: Clone ImmortalWrt
       run: |
         git clone --depth=1 https://github.com/immortalwrt/immortalwrt.git \
-          -b openwrt-24.10 /home/runner/immortalwrt
+          -b openwrt-24.10 openwrt
 
     - name: Prepare SL3000
       run: |
@@ -44,7 +44,7 @@ jobs:
 
     - name: Build firmware
       run: |
-        cd /home/runner/immortalwrt
+        cd openwrt
         export CCACHE_DIR=~/.ccache
         export CC="ccache gcc"
         export CXX="ccache g++"
@@ -95,7 +95,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: firmware
-        path: /home/runner/immortalwrt/bin/targets/*/*/*
+        path: openwrt/bin/targets/*/*/*
 
     - name: Release firmware
       if: success()
@@ -108,6 +108,6 @@ jobs:
           - 构建编号：${{ github.run_number }}
           - 缓存：dl
           - 自动修复：工具链 / dl / feeds / 磁盘
-        files: /home/runner/immortalwrt/bin/targets/*/*/*
+        files: openwrt/bin/targets/*/*/*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
