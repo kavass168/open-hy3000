@@ -39,10 +39,12 @@ cp -vf ../image/*.mk "$ROOT/target/linux/mediatek/image/" || err "缺少 image/*
 # ============================
 # 2. 注册 DTS 到 Makefile
 # ============================
-DTS_NAME=$(basename $(ls target/linux/mediatek/dts/mt7981*-sl3000*.dts 2>/dev/null | head -n1))
-[ -z "$DTS_NAME" ] && err "未找到 SL3000 DTS 文件"
+DTS_FILE=$(ls target/linux/mediatek/dts/mt7981*-sl3000*.dts 2>/dev/null | head -n1)
+[ -z "$DTS_FILE" ] && err "未找到 SL3000 DTS 文件"
 
+DTS_NAME=$(basename "$DTS_FILE")
 MAKEFILE="target/linux/mediatek/Makefile"
+
 grep -q "$DTS_NAME" "$MAKEFILE" || {
     echo "dts-\$(CONFIG_TARGET_mediatek_filogic) += $DTS_NAME" >> "$MAKEFILE"
     log "已自动注册 DTS 到 mediatek/Makefile: $DTS_NAME"
@@ -97,39 +99,17 @@ else
 fi
 
 # ============================
-# 6. 科学上网支持（Passwall2）
+# 6. 移除科学上网（Passwall2）
 # ============================
-log "检查科学上网支持..."
-grep -q "CONFIG_PACKAGE_luci-app-passwall2=y" .config || {
-    cat >> .config <<EOF
-
-# === Passwall2 ===
-CONFIG_PACKAGE_luci-app-passwall2=y
-CONFIG_PACKAGE_passwall2=y
-CONFIG_PACKAGE_passwall2-proxy=y
-CONFIG_PACKAGE_passwall2-core=y
-CONFIG_PACKAGE_xray-core=y
-CONFIG_PACKAGE_v2ray-core=y
-CONFIG_PACKAGE_sing-box=y
-CONFIG_PACKAGE_trojan=y
-CONFIG_PACKAGE_trojan-plus=y
-CONFIG_PACKAGE_trojan-go=y
-CONFIG_PACKAGE_chinadns-ng=y
-CONFIG_PACKAGE_dns2socks=y
-CONFIG_PACKAGE_dns2tcp=y
-CONFIG_PACKAGE_pdnsd-alt=y
-CONFIG_PACKAGE_ipt2socks=y
-CONFIG_PACKAGE_libopenssl=y
-CONFIG_PACKAGE_libustream-openssl=y
-EOF
-    log "已注入 Passwall2 配置"
-}
+log "移除科学上网相关配置（保持系统纯净）"
+sed -i '/passwall2/d;/xray-core/d;/v2ray-core/d;/sing-box/d;/trojan/d;/chinadns-ng/d;/dns2socks/d;/dns2tcp/d;/pdnsd-alt/d;/ipt2socks/d' .config || true
 
 # ============================
 # 7. 构建固件
 # ============================
 log "开始构建固件..."
 make defconfig
+
 if ! make -j"$(nproc)"; then
     log "并行构建失败，尝试单线程详细模式..."
     make -j1 V=s 2>&1 | tee -a "$LOG" || { err "构建失败，请查看 $LOG"; exit 1; }
@@ -137,4 +117,5 @@ fi
 
 log "构建成功 ✅"
 find bin/targets/ -type f -name "*.bin" -exec echo "生成固件: {}" \;
+
 exit 0
