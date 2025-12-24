@@ -1,0 +1,181 @@
+name: Build SL3000
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Free disk space
+      run: |
+        sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache
+        sudo docker system prune -af || true
+        sudo apt clean
+        df -h
+
+    - name: Install dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y build-essential clang flex bison g++ gawk gcc-multilib \
+          gettext git libncurses5-dev libssl-dev python3-distutils rsync unzip zlib1g-dev \
+          file wget python3 python3-pip ccache perl pkg-config libelf-dev
+
+    - name: Cache downloads
+      uses: actions/cache@v4
+      with:
+        path: openwrt/dl
+        key: dl-${{ runner.os }}
+        restore-keys: dl-
+
+    - name: Cache ccache
+      uses: actions/cache@v4
+      with:
+        path: ~/.ccache
+        key: ccache-${{ runner.os }}
+        restore-keys: ccache-
+
+    - name: Clone OpenWrt 25.12
+      run: |
+        git clone --depth=1 https://github.com/openwrt/openwrt.git -b openwrt-25.12 openwrt
+
+    - name: Prepare & Auto-Fix SL3000
+      run: |
+        set -e
+        set -x
+        ROOT="$(pwd)/openwrt"
+
+        # 复制三件套
+        cp config/sl3000.config "$ROOT/.config"
+        cp dts/*.dts "$ROOT/target/linux/mediatek/dts/"
+        cp image/*.mk "$ROOT/target/linux/mediatek/image/"
+
+        # 注册 DTS
+        DTS_NAME=$(basename $(ls "$ROOT/target/linux/mediatek/dts/mt7981*-sl3000*.dts" | head -n1))
+        MAKEFILE="$ROOT/target/linux/mediatek/Makefile"
+        grep -q "$DTS_NAME" "$MAKEFILE" || echo "dts-\$(CONFIG_TARGET_mediatek_filogic) += $DTS_NAME" >> "$MAKEFILE"
+
+        # 校验 image.mk
+        MK="$ROOT/target/linux/mediatek/image/filogic.mk"
+        grep -q "Device/sl3000" "$MK" || echo "[ERROR] filogic.mk 未包含 Device/sl3000 定义"
+        grep -q "TARGET_DEVICES += sl3000" "$MK" || echo "[ERROR] filogic.mk 未添加 sl3000 到 TARGET_DEVICES"
+
+        cd "$ROOT"
+
+        # feeds 修复 + 冲突包清理
+        ./scripts/feeds update -a || true
+        ./scripts/feeds install -a || true
+        sed -i '/uw-imap/d;/python3-pysocks/d;/python3-unidecode/d;/CONFIG_PACKAGE_backuppc/d' .config || true
+
+        make defconfig || true
+
+        # gpio-button-hotplug 补丁检测
+        PATCH_FILE="../patches/gpio-button-hotplug/001-fix-broadcast_uevent.patch"
+        PKG_DIR="package/kernel/gpio-button-hotplug"
+        PATCH_DST="$PKG_DIR/patches"
+        if [ -d "$PKG_DIR" ] && [ -f "$PATCH_FILE" ]; then
+          make package/kernel/gpio-button-hotplug/{clean,prepare} V=s || true
+          SRC_DIR=$(find build_dir/target-*/linux-*/gpio-button-hotplug -maxdepth 0 | head -n1)
+          if [ -d "$SRC_DIR" ]; then
+            if patch --dry-run -p1 -d "$SRC_DIR" < "$PATCH_FILE" >/dev/null 2>&1; then
+              mkdir -p "$PATCH_DST"
+              cp "$PATCH_FILE" "$PATCH_DST/"
+            fi
+          fi
+        fi
+
+        # 科学上网配置注入
+        grep -q "CONFIG_PACKAGE_luci-app-passwall2=y" .config || cat >> .config <<EOF
+        CONFIG_PACKAGE_luci-app-passwall2=y
+        CONFIG_PACKAGE_passwall2=y
+        CONFIG_PACKAGE_passwall2-core=y
+        CONFIG_PACKAGE_passwall2-proxy=y
+        CONFIG_PACKAGE_xray-core=y
+        CONFIG_PACKAGE_v2ray-core=y
+        CONFIG_PACKAGE_sing-box=y
+        CONFIG_PACKAGE_trojan=y
+        CONFIG_PACKAGE_trojan-plus=y
+        CONFIG_PACKAGE_trojan-go=y
+        CONFIG_PACKAGE_chinadns-ng=y
+        CONFIG_PACKAGE_dns2socks=y
+        CONFIG_PACKAGE_dns2tcp=y
+        CONFIG_PACKAGE_pdnsd-alt=y
+        CONFIG_PACKAGE_ipt2socks=y
+        CONFIG_PACKAGE_libopenssl=y
+        CONFIG_PACKAGE_libustream-openssl=y
+        EOF
+
+        # config 校验修复
+        grep -q "CONFIG_TARGET_mediatek=y" .config || echo "CONFIG_TARGET_mediatek=y" >> .config
+        grep -q "CONFIG_TARGET_mediatek_filogic=y" .config || echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
+
+        # Makefile include 修复
+        IMG_MAKE="target/linux/mediatek/image/Makefile"
+        grep -q "filogic.mk" "$IMG_MAKE" || echo "include ./filogic.mk" >> "$IMG_MAKE"
+
+    - name: Build firmware
+      run: |
+        cd openwrt
+        export CCACHE_DIR=~/.ccache
+        export CC="ccache gcc"
+        export CXX="ccache g++"
+
+        make defconfig
+
+        # 工具链修复
+        make tools/compile -j1 V=s || {
+          rm -rf build_dir/host/stamp tools/stamp staging_dir/host/stamp
+          make tools/compile -j1 V=s
+        }
+
+        # dl 下载修复
+        make download -j8 || {
+          rm -rf dl/*
+          make download -j8
+        }
+
+        ./scripts/feeds update -a || true
+        ./scripts/feeds install -a || true
+
+        # 构建失败自动重试
+        timeout 1200 make -j1 V=s || {
+          echo "[WARN] 构建失败，自动重试一次..."
+          timeout 1200 make -j1 V=s
+        }
+
+        # 磁盘爆满 fail-fast
+        df -h
+        USED=$(df -h | awk '$NF=="/"{print $5}' | sed 's/%//')
+        if [ "$USED" -gt 90 ]; then
+          echo "[WARN] 磁盘空间不足，自动清理..."
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache
+          df -h
+        fi
+
+        ccache -s || true
+
+    - name: Upload firmware
+      if: success()
+      uses: actions/upload-artifact@v4
+      with:
+        name: firmware
+        path: openwrt/bin/targets/*/*/*
+
+    - name: Release firmware
+      if: success()
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: sl3000-${{ github.run_number }}
+        name: "SL3000 Firmware Build #${{ github.run_number }}"
+        body: |
+          自动构建固件（SL3000 / OpenWrt 25.12）
+          - 构建编号：${{ github.run_number }}
+          - 缓存：dl / ccache
+          - 自动修复：工具链 / dl / feeds / 补丁 / 科学上网 / config / Makefile / 磁盘 / 重试
+        files: openwrt/bin/targets/*/*/*
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
