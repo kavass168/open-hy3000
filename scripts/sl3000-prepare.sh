@@ -1,7 +1,12 @@
 #!/bin/bash
 set -e
 
+# ============================
+# 0. 强制进入源码目录
+# ============================
 ROOT="$(pwd)/openwrt"
+cd "$ROOT"
+
 REPORT_DIR="$ROOT/build-report"
 LOG="$REPORT_DIR/error.log"
 
@@ -15,17 +20,11 @@ trap 'err "构建失败，已记录错误日志"; exit 1' ERR
 log "开始 SL3000 全自动修复 + 构建流程"
 
 # ============================
-# 0. 基础目录自愈
-# ============================
-mkdir -p "$ROOT" "$ROOT/staging_dir" "$ROOT/toolchain" "$ROOT/bin"
-mkdir -p "$ROOT/target/linux/mediatek/dts" "$ROOT/target/linux/mediatek/image"
-
-# ============================
 # 1. 复制三件套
 # ============================
-cp -f config/sl3000.config "$ROOT/.config" || err "缺少 config/sl3000.config"
-cp -f dts/*.dts "$ROOT/target/linux/mediatek/dts/" || err "缺少 dts/*.dts"
-cp -f image/*.mk "$ROOT/target/linux/mediatek/image/" || err "缺少 image/*.mk"
+cp -f ../config/sl3000.config "$ROOT/.config" || err "缺少 config/sl3000.config"
+cp -f ../dts/*.dts "$ROOT/target/linux/mediatek/dts/" || err "缺少 dts/*.dts"
+cp -f ../image/*.mk "$ROOT/target/linux/mediatek/image/" || err "缺少 image/*.mk"
 
 # ============================
 # 2. 自动识别 DTS
@@ -46,15 +45,8 @@ MK="$ROOT/target/linux/mediatek/image/filogic.mk"
 [ -f "$MK" ] && grep -q "sl3000" "$MK" || err "image.mk 未包含 sl3000 定义"
 
 # ============================
-# 4. kernel include 修复
+# 4. feeds & package 修复
 # ============================
-INC="$ROOT/include/kernel-defaults.mk"
-[ -f "$INC" ] && sed -i 's/CONFIG_KERNEL_/CONFIG_/g' "$INC" || true
-
-# ============================
-# 5. feeds & package 修复
-# ============================
-cd "$ROOT"
 ./scripts/feeds update -a || true
 ./scripts/feeds install -a || true
 
@@ -69,7 +61,7 @@ sed -i '/CONFIG_PACKAGE_backuppc/d' .config || true
 make defconfig || true
 
 # ============================
-# 6. gpio-button-hotplug 修复补丁
+# 5. gpio-button-hotplug 修复补丁
 # ============================
 PATCH_SRC="../patches/gpio-button-hotplug"
 PATCH_DST="$ROOT/package/kernel/gpio-button-hotplug/patches"
@@ -78,9 +70,7 @@ if [ -d "$ROOT/package/kernel/gpio-button-hotplug" ]; then
     mkdir -p "$PATCH_DST"
     if [ -f "$PATCH_SRC/001-fix-broadcast_uevent.patch" ]; then
         log "应用 gpio-button-hotplug 修复补丁..."
-        # 强制覆盖，确保路径正确
         cp "$PATCH_SRC/001-fix-broadcast_uevent.patch" "$PATCH_DST/"
-        log "补丁已复制到 $PATCH_DST"
     else
         log "未找到 gpio-button-hotplug 补丁文件，跳过"
     fi
@@ -89,7 +79,7 @@ else
 fi
 
 # ============================
-# 7. 科学上网支持（Passwall2）
+# 6. 科学上网支持（Passwall2）
 # ============================
 log "检查科学上网支持..."
 grep -q "CONFIG_PACKAGE_luci-app-passwall2=y" .config || {
@@ -116,21 +106,7 @@ EOF
 }
 
 # ============================
-# 8. 常见插件安装
-# ============================
-for p in luci luci-compat luci-app-dockerman docker; do
-    grep -q "$p" .config && ./scripts/feeds install "$p" || true
-done
-
-# ============================
-# 9. 上游变更提示
-# ============================
-UP_DTS_REF="$ROOT/target/linux/mediatek/dts/mt7981b-rfb.dts"
-[ -f "$UP_DTS_REF" ] && ! diff -q "$UP_DTS_REF" "$DTS" >/dev/null 2>&1 && \
-    log "提示：上游 DTS 有更新，建议 review"
-
-# ============================
-# 10. 构建
+# 7. 构建
 # ============================
 log "开始最终构建固件..."
 make defconfig
