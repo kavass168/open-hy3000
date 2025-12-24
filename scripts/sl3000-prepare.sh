@@ -70,21 +70,34 @@ sed -i '/CONFIG_PACKAGE_backuppc/d' .config || true
 make defconfig || true
 
 # ============================
-# 5. gpio-button-hotplug 修复补丁
+# 5. gpio-button-hotplug 修复补丁（带兼容性检测）
 # ============================
 PATCH_SRC="../patches/gpio-button-hotplug"
-PATCH_DST="$ROOT/package/kernel/gpio-button-hotplug/patches"
+PATCH_FILE="$PATCH_SRC/001-fix-broadcast_uevent.patch"
+PKG_DIR="$ROOT/package/kernel/gpio-button-hotplug"
+PATCH_DST="$PKG_DIR/patches"
 
-if [ -d "$ROOT/package/kernel/gpio-button-hotplug" ]; then
-    mkdir -p "$PATCH_DST"
-    if [ -f "$PATCH_SRC/001-fix-broadcast_uevent.patch" ]; then
-        log "应用 gpio-button-hotplug 修复补丁..."
-        cp "$PATCH_SRC/001-fix-broadcast_uevent.patch" "$PATCH_DST/"
+if [ -d "$PKG_DIR" ] && [ -f "$PATCH_FILE" ]; then
+    log "检测 gpio-button-hotplug 补丁兼容性..."
+
+    # 先准备源码，避免 dry-run 找不到文件
+    make package/kernel/gpio-button-hotplug/{clean,prepare} V=s || true
+
+    SRC_DIR=$(echo "$ROOT"/build_dir/target-*/linux-*/gpio-button-hotplug | head -n1)
+
+    if [ -d "$SRC_DIR" ]; then
+        if patch --dry-run -p1 -d "$SRC_DIR" < "$PATCH_FILE" >/dev/null 2>&1; then
+            log "补丁与当前源码匹配，启用该补丁"
+            mkdir -p "$PATCH_DST"
+            cp "$PATCH_FILE" "$PATCH_DST/"
+        else
+            log "补丁不兼容当前源码，已跳过（防止构建失败）"
+        fi
     else
-        log "未找到 gpio-button-hotplug 补丁文件，跳过"
+        log "未找到 gpio-button-hotplug 源码目录，跳过补丁"
     fi
 else
-    log "gpio-button-hotplug 不存在，跳过补丁"
+    log "未找到 gpio-button-hotplug 包或补丁文件，跳过补丁"
 fi
 
 # ============================
