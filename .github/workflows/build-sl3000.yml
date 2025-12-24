@@ -67,9 +67,8 @@ jobs:
         ./scripts/feeds install -a || true
 
         timeout 1200 make -j1 V=s | tee build.log || {
-          echo "❌ 构建失败，收集错误日志..."
-          tail -n 200 build.log > error.log || echo "无 build.log" > error.log
-          tail -n 50 build.log
+          echo "❌ 构建失败，收集错误日志..." > error.log
+          tail -n 200 build.log >> error.log || echo "无 build.log" >> error.log
           exit 1
         }
 
@@ -110,4 +109,4 @@ jobs:
           - 自动修复：工具链 / dl / feeds / 磁盘
         files: openwrt/bin/targets/*/*/*
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB.GITHUB_TOKEN }}
