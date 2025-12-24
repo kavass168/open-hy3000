@@ -1,10 +1,23 @@
 #!/bin/bash
 set -e
 
+log() { echo -e "[SL3000] $1"; }
+err() { echo -e "[ERROR] $1" | tee -a "$LOG"; }
+
 # ============================
-# 0. 强制进入源码目录
+# 0. 自动定位 openwrt 源码目录
 # ============================
-ROOT="$(pwd)/openwrt"
+if [ -d "openwrt" ]; then
+    ROOT="$(pwd)/openwrt"
+elif [ -d "../openwrt" ]; then
+    ROOT="$(pwd)/../openwrt"
+elif [ -d "/home/runner/work/${GITHUB_REPOSITORY#*/}/${GITHUB_REPOSITORY#*/}/openwrt" ]; then
+    ROOT="/home/runner/work/${GITHUB_REPOSITORY#*/}/${GITHUB_REPOSITORY#*/}/openwrt"
+else
+    err "未找到 openwrt 源码目录，请检查工作流 clone 目录"
+    exit 1
+fi
+
 cd "$ROOT"
 
 REPORT_DIR="$ROOT/build-report"
@@ -13,8 +26,6 @@ LOG="$REPORT_DIR/error.log"
 mkdir -p "$REPORT_DIR"
 rm -f "$LOG"
 
-log() { echo -e "[SL3000] $1"; }
-err() { echo -e "[ERROR] $1" | tee -a "$LOG"; }
 trap 'err "构建失败，已记录错误日志"; exit 1' ERR
 
 log "开始 SL3000 全自动修复 + 构建流程"
@@ -50,12 +61,10 @@ MK="$ROOT/target/linux/mediatek/image/filogic.mk"
 ./scripts/feeds update -a || true
 ./scripts/feeds install -a || true
 
-# 清理坏包依赖
 for p in uw-imap python3-pysocks python3-unidecode; do
     sed -i "/$p/d" .config || true
 done
 
-# 循环依赖 backuppc
 sed -i '/CONFIG_PACKAGE_backuppc/d' .config || true
 
 make defconfig || true
