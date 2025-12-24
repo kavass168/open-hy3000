@@ -42,11 +42,11 @@ jobs:
         git clone --depth=1 https://github.com/immortalwrt/immortalwrt.git \
           -b openwrt-24.10 /home/runner/immortalwrt
 
-    # 6. 固定脚本名称（永远不变）
+    # 6. 固定脚本名称（改为 sl3000-prepare.sh）
     - name: Prepare SL3000
       run: |
-        chmod +x scripts/prepare_s13000.sh
-        ./scripts/prepare_s13000.sh
+        chmod +x scripts/sl3000-prepare.sh
+        ./scripts/sl3000-prepare.sh
 
     # 7. 构建固件（自动修复工具链/dl/feeds/磁盘 + fail-fast + 日志收集）
     - name: Build firmware
