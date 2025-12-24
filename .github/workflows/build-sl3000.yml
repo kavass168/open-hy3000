@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  buil
+  build:
     runs-on: ubuntu-22.04
 
     steps:
@@ -12,7 +12,7 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Free disk space
-      run:
+      run: |
         sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache
         sudo docker system prune -af || true
         sudo apt clean
@@ -51,12 +51,14 @@ jobs:
 
         make defconfig
 
+        # 修复工具链
         make tools/compile -j1 V=s || {
           echo "⚠️ 工具链编译失败，自动清理并重试..."
           rm -rf build_dir/host/stamp tools/stamp staging_dir/host/stamp
           make tools/compile -j1 V=s
         }
 
+        # 修复 dl 下载失败
         make download -j8 || {
           echo "⚠️ dl 下载失败，自动清理并重试..."
           rm -rf dl/*
@@ -66,12 +68,14 @@ jobs:
         ./scripts/feeds update -a || true
         ./scripts/feeds install -a || true
 
+        # 主构建
         timeout 1200 make -j1 V=s | tee build.log || {
           echo "❌ 构建失败，收集错误日志..." > error.log
           tail -n 200 build.log >> error.log || echo "无 build.log" >> error.log
           exit 1
         }
 
+        # 磁盘检查
         df -h
         USED=$(df -h | awk '$NF=="/"{print $5}' | sed 's/%//')
         if [ "$USED" -gt 90 ]; then
@@ -109,4 +113,4 @@ jobs:
           - 自动修复：工具链 / dl / feeds / 磁盘
         files: openwrt/bin/targets/*/*/*
       env:
-        GITHUB.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
