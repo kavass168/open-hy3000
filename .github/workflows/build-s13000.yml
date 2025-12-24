@@ -57,10 +57,7 @@ jobs:
         echo "[INFO] 自动检测 DTS 文件"
         DTS_FILE=""
         for f in "$ROOT/target/linux/mediatek/dts"/mt7981*-sl3000*.dts; do
-          if [ -f "$f" ]; then
-            DTS_FILE="$f"
-            break
-          fi
+          [ -f "$f" ] && DTS_FILE="$f" && break
         done
 
         if [ -z "$DTS_FILE" ]; then
@@ -75,8 +72,6 @@ jobs:
         if ! grep -q "$DTS_NAME" "$MAKEFILE"; then
           echo "dts-\$(CONFIG_TARGET_mediatek_filogic) += $DTS_NAME" >> "$MAKEFILE"
           echo "[INFO] 已注册 DTS: $DTS_NAME"
-        else
-          echo "[INFO] DTS 已存在: $DTS_NAME"
         fi
 
         echo "[INFO] 校验 image.mk"
@@ -101,12 +96,10 @@ jobs:
         if [ -d "$PKG_DIR" ] && [ -f "$PATCH_FILE" ]; then
           make package/kernel/gpio-button-hotplug/{clean,prepare} V=s || true
           SRC_DIR=$(find build_dir/target-*/linux-*/gpio-button-hotplug -maxdepth 0 | head -n1)
-          if [ -d "$SRC_DIR" ]; then
-            if patch --dry-run -p1 -d "$SRC_DIR" < "$PATCH_FILE" >/dev/null 2>&1; then
-              mkdir -p "$PATCH_DST"
-              cp "$PATCH_FILE" "$PATCH_DST/"
-              echo "[INFO] 已应用 gpio-button-hotplug 补丁"
-            fi
+          if [ -d "$SRC_DIR" ] && patch --dry-run -p1 -d "$SRC_DIR" < "$PATCH_FILE" >/dev/null 2>&1; then
+            mkdir -p "$PATCH_DST"
+            cp "$PATCH_FILE" "$PATCH_DST/"
+            echo "[INFO] 已应用 gpio-button-hotplug 补丁"
           fi
         fi
 
@@ -172,13 +165,56 @@ jobs:
         echo "[INFO] 磁盘空间检查"
         df -h
         USED=$(df -h | awk '$NF=="/"{print $5}' | sed 's/%//')
-        if [ "$USED" -gt 90 ]; then
-          echo "[WARN] 磁盘空间不足，自动清理..."
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache
-          df -h
-        fi
+        [ "$USED" -gt 90 ] && sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache
 
         ccache -s || true
+
+    - name: Verify firmware (Auto‑Verification)
+      if: success()
+      run: |
+        set -e
+        echo "[INFO] 开始自动验证固件..."
+
+        TARGET_DIR=$(find openwrt/bin/targets -maxdepth 3 -type d | grep -E "mediatek|filogic" | head -n1)
+
+        echo "[INFO] 验证 DTS 是否被编译进内核"
+        find openwrt/build_dir -name "*sl3000*.dtb" | grep sl3000 || {
+          echo "[ERROR] 未找到 sl3000 dtb，DTS 未生效"
+          exit 1
+        }
+
+        echo "[INFO] 验证 image.mk 是否生效（profiles.json）"
+        grep -q sl3000 "$TARGET_DIR/profiles.json" || {
+          echo "[ERROR] profiles.json 中未找到 sl3000，image.mk 未生效"
+          exit 1
+        }
+
+        echo "[INFO] 验证固件是否生成"
+        ls "$TARGET_DIR"/*sl3000*.bin || {
+          echo "[ERROR] 未生成 sl3000 固件文件"
+          exit 1
+        }
+
+        FW=$(ls "$TARGET_DIR"/*sl3000*.bin | head -n1)
+
+        echo "[INFO] 验证固件大小是否合理"
+        SIZE=$(stat -c%s "$FW")
+        [ "$SIZE" -lt 4000000 ] && {
+          echo "[ERROR] 固件大小异常（小于 4MB）"
+          exit 1
+        }
+
+        echo "[INFO] 验证 rootfs / kernel 是否存在"
+        ls "$TARGET_DIR"/*rootfs* >/dev/null || {
+          echo "[ERROR] 未找到 rootfs 文件"
+          exit 1
+        }
+        ls "$TARGET_DIR"/*kernel* >/dev/null || {
+          echo "[ERROR] 未找到 kernel 文件"
+          exit 1
+        }
+
+        echo "[INFO] 自动验证通过，固件构建完整且有效"
 
     - name: Upload firmware
       if: success()
@@ -196,7 +232,8 @@ jobs:
         body: |
           自动构建固件（SL3000 / OpenWrt 25.12）
           - 构建编号：${{ github.run_number }}
-          - 自动修复：工具链 / dl / feeds / 补丁 / 科学上网 / config / Makefile / DTS / 磁盘 / 重试
+          - 自动修复：工具链 / dl / feeds / 补丁 / config / DTS / image.mk / 磁盘 / 重试
+          - 自动验证：dtb / profiles.json / 固件大小 / rootfs / kernel
         files: openwrt/bin/targets/*/*/*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
