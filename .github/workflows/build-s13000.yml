@@ -6,7 +6,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 180   # 整个 Job 超时控制，避免内核阶段被误杀
+    timeout-minutes: 180
 
     steps:
     - name: Checkout repository
@@ -72,9 +72,15 @@ jobs:
         grep -q "TARGET_DEVICES += sl3000" "$MK" || echo "[ERROR] filogic.mk 缺少 TARGET_DEVICES += sl3000"
 
         cd "$ROOT"
+
+        echo "[INFO] feeds 修复"
         ./scripts/feeds update -a || true
         ./scripts/feeds install -a || true
+
+        echo "[INFO] 清理冲突包"
         sed -i '/uw-imap/d;/python3-pysocks/d;/python3-unidecode/d;/CONFIG_PACKAGE_backuppc/d' .config || true
+
+        echo "[INFO] defconfig 修复"
         make defconfig || true
 
         echo "[INFO] 自动修复 gpio-button-hotplug 补丁"
@@ -89,27 +95,6 @@ jobs:
             cp "$PATCH_FILE" "$PATCH_DST/"
           fi
         fi
-
-        echo "[INFO] 注入科学上网配置"
-        grep -q "CONFIG_PACKAGE_luci-app-passwall2=y" .config || cat >> .config <<EOF
-        CONFIG_PACKAGE_luci-app-passwall2=y
-        CONFIG_PACKAGE_passwall2=y
-        CONFIG_PACKAGE_passwall2-core=y
-        CONFIG_PACKAGE_passwall2-proxy=y
-        CONFIG_PACKAGE_xray-core=y
-        CONFIG_PACKAGE_v2ray-core=y
-        CONFIG_PACKAGE_sing-box=y
-        CONFIG_PACKAGE_trojan=y
-        CONFIG_PACKAGE_trojan-plus=y
-        CONFIG_PACKAGE_trojan-go=y
-        CONFIG_PACKAGE_chinadns-ng=y
-        CONFIG_PACKAGE_dns2socks=y
-        CONFIG_PACKAGE_dns2tcp=y
-        CONFIG_PACKAGE_pdnsd-alt=y
-        CONFIG_PACKAGE_ipt2socks=y
-        CONFIG_PACKAGE_libopenssl=y
-        CONFIG_PACKAGE_libustream-openssl=y
-        EOF
 
         echo "[INFO] config 校验修复"
         grep -q "CONFIG_TARGET_mediatek=y" .config || echo "CONFIG_TARGET_mediatek=y" >> .config
@@ -143,10 +128,10 @@ jobs:
         ./scripts/feeds update -a || true
         ./scripts/feeds install -a || true
 
-        echo "[INFO] 编译内核（分段，适度并发）"
-        make target/linux/compile -j2 || {
-          echo "[WARN] 内核编译失败，启用详细日志重试..."
-          make target/linux/compile -j1 V=s
+        echo "[INFO] 编译内核（详细日志，避免 syncconfig 隐藏错误）"
+        make target/linux/compile -j1 V=sc || {
+          echo "[WARN] 内核编译失败，重试..."
+          make target/linux/compile -j1 V=sc
         }
 
         echo "[INFO] 编译 world（失败自动重试）"
@@ -182,4 +167,30 @@ jobs:
         SIZE=$(stat -c%s "$FW")
         [ "$SIZE" -lt 4000000 ] && { echo "[ERROR] 固件大小异常"; exit 1; }
 
-        echo "[INFO] 验证 root
+        echo "[INFO] 验证 rootfs / kernel 是否存在"
+        ls "$TARGET_DIR"/*rootfs* >/dev/null || { echo "[ERROR] 未找到 rootfs"; exit 1; }
+        ls "$TARGET_DIR"/*kernel* >/dev/null || { echo "[ERROR] 未找到 kernel"; exit 1; }
+
+        echo "[INFO] 自动验证通过"
+
+    - name: Upload firmware
+      if: success()
+      uses: actions/upload-artifact@v4
+      with:
+        name: firmware
+        path: openwrt/bin/targets/*/*/*
+
+    - name: Release firmware
+      if: success()
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: sl3000-${{ github.run_number }}
+        name: "SL3000 Firmware Build #${{ github.run_number }}"
+        body: |
+          自动构建固件（SL3000 / OpenWrt 25.12）
+          - 构建编号：${{ github.run_number }}
+          - 自动修复：工具链 / dl / feeds / 补丁 / config / DTS / image.mk / 磁盘 / 重试
+          - 自动验证：dtb / profiles.json / 固件大小 / rootfs / kernel
+        files: openwrt/bin/targets/*/*/*
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
