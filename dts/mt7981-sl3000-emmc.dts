@@ -6,34 +6,46 @@
 	model = "SL-3000 (EMMC)";
 	compatible = "sl,3000-emmc", "mediatek,mt7981";
 
-	chosen {
-		bootargs = "console=ttyS0,115200n8";
+	aliases {
+		serial0 = &uart0;
+		led-boot = &red_power;
+		led-failsafe = &red_power;
+		led-running = &green_status;
+		led-upgrade = &blue_wifi;
 	};
 
-	/* ===== LED（真实 GPIO）===== */
+	chosen {
+		bootargs = "console=ttyS0,115200n8";
+		stdout-path = "serial0:115200n8";
+	};
+
+	memory@40000000 {
+		device_type = "memory";
+		reg = <0x40000000 0x10000000>; /* 256MB */
+	};
+
 	leds {
 		compatible = "gpio-leds";
 
-		red_power {
+		red_power: red_power {
 			label = "sl3000:red:power";
 			gpios = <&pio 10 GPIO_ACTIVE_LOW>;
 			default-state = "on";
 		};
 
-		green_status {
+		green_status: green_status {
 			label = "sl3000:green:status";
 			gpios = <&pio 11 GPIO_ACTIVE_LOW>;
 			default-state = "off";
 		};
 
-		blue_wifi {
+		blue_wifi: blue_wifi {
 			label = "sl3000:blue:wifi";
 			gpios = <&pio 12 GPIO_ACTIVE_LOW>;
 			default-state = "off";
 		};
 	};
 
-	/* ===== 按键（真实 GPIO）===== */
 	gpio-keys {
 		compatible = "gpio-keys";
 
@@ -45,7 +57,7 @@
 
 		mesh {
 			label = "mesh";
-			linux,code = <KEY_MESH>;
+			linux,code = <KEY_WPS_BUTTON>;
 			gpios = <&pio 0 GPIO_ACTIVE_LOW>;
 		};
 	};
@@ -56,7 +68,7 @@
 	status = "okay";
 };
 
-/* ===== EMMC（真实配置）===== */
+/* ===== EMMC ===== */
 &mmc0 {
 	status = "okay";
 	bus-width = <8>;
@@ -66,7 +78,7 @@
 	max-frequency = <52000000>;
 };
 
-/* ===== 以太网 + 交换机（真实端口映射）===== */
+/* ===== Ethernet + Switch ===== */
 &eth {
 	status = "okay";
 
@@ -93,7 +105,6 @@
 				#address-cells = <1>;
 				#size-cells = <0>;
 
-				/* 真实端口映射 */
 				port@0 {
 					reg = <0>;
 					label = "lan1";
@@ -114,7 +125,6 @@
 					label = "wan";
 				};
 
-				/* CPU 端口 */
 				port@6 {
 					reg = <6>;
 					label = "cpu";
@@ -131,7 +141,7 @@
 	};
 };
 
-/* ===== WiFi（真实芯片）===== */
+/* ===== WiFi ===== */
 &wifi {
 	status = "okay";
 };
