@@ -2,6 +2,7 @@ define Device/sl3000-emmc
   DEVICE_VENDOR := SL
   DEVICE_MODEL := SL3000 (EMMC)
   DEVICE_DTS := mt7981-sl3000-emmc
+  SUPPORTED_DEVICES := sl3000-emmc
   DEVICE_PACKAGES := \
 	kmod-mt7981-firmware \
 	kmod-mt76-connac-lib \
