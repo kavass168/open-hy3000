@@ -21,4 +21,4 @@ grep -q "$DTS_NAME" "$MED_MK" || echo "dts-\$(CONFIG_TARGET_mediatek_filogic) +=
 
 log "修复 image.mk include"
 IMG_MAKE="target/linux/mediatek/image/Makefile"
-grep -q "filogic.mk" "$IMG_MAKE" || echo "
+grep -q "fil
