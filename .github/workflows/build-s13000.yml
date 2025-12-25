@@ -38,9 +38,9 @@ jobs:
         cd "$ROOT"
 
         echo "[INFO] 复制三件套"
-        cp -vf configs/sl3000.config "$ROOT/.config"
-        cp -vf dts/mt7981b-sl3000-emmc.dts "$ROOT/target/linux/mediatek/dts/"
-        cp -vf image/filogic.mk "$ROOT/target/linux/mediatek/image/"
+        cp -vf ../configs/sl3000.config "$ROOT/.config"
+        cp -vf ../dts/mt7981b-sl3000-emmc.dts "$ROOT/target/linux/mediatek/dts/"
+        cp -vf ../image/filogic.mk "$ROOT/target/linux/mediatek/image/"
 
         echo "[INFO] 自动检测并注册 DTS"
         DTS_FILE=$(find target/linux/mediatek/dts -maxdepth 1 -name "mt7981*sl3000*.dts" | sort | head -n1)
