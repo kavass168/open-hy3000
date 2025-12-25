@@ -12,6 +12,14 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
+    - name: Cache dl directory
+      uses: actions/cache@v3
+      with:
+        path: immortalwrt/dl
+        key: dl-cache-${{ runner.os }}-${{ github.run_id }}
+        restore-keys: |
+          dl-cache-${{ runner.os }}-
+
     - name: Free disk space
       run: |
         sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache
@@ -38,34 +46,38 @@ jobs:
         cd "$ROOT"
 
         echo "[INFO] 复制三件套"
-        cp -vf ../configs/sl3000.config "$ROOT/.config"
-        cp -vf ../dts/mt7981-sl3000-emmc.dts "$ROOT/target/linux/mediatek/dts/"
-        cp -vf ../image/filogic.mk "$ROOT/target/linux/mediatek/image/"
+        cp -vf ../configs/sl3000.config .config
+        cp -vf ../dts/mt7981-sl3000-emmc.dts target/linux/mediatek/dts/
+        cp -vf ../image/filogic.mk target/linux/mediatek/image/
 
-        echo "[INFO] 自动检测并注册 DTS"
-        DTS_FILE=$(find target/linux/mediatek/dts -maxdepth 1 -name "mt7981*sl3000*.dts" | sort | head -n1)
-        [ -z "$DTS_FILE" ] && { echo "[ERROR] 未找到 SL3000 DTS"; exit 1; }
-        DTS_NAME=$(basename "$DTS_FILE")
-        MED_MK="target/linux/mediatek/Makefile"
-        grep -q "$DTS_NAME" "$MED_MK" || echo "dts-\$(CONFIG_TARGET_mediatek_filogic) += $DTS_NAME" >> "$MED_MK"
+        echo "[INFO] 注册 DTS"
+        DTS_NAME="mt7981-sl3000-emmc.dts"
+        grep -q "$DTS_NAME" target/linux/mediatek/Makefile || echo "dts-\$(CONFIG_TARGET_mediatek_filogic) += $DTS_NAME" >> target/linux/mediatek/Makefile
 
-        echo "[INFO] 修复 image/Makefile include"
-        IMG_MAKE="target/linux/mediatek/image/Makefile"
-        grep -q "filogic.mk" "$IMG_MAKE" || echo "include ./filogic.mk" >> "$IMG_MAKE"
+        echo "[INFO] 修复 image.mk include"
+        grep -q "filogic.mk" target/linux/mediatek/image/Makefile || echo "include ./filogic.mk" >> target/linux/mediatek/image/Makefile
 
         echo "[INFO] 校验 Device/sl3000"
-        MK="target/linux/mediatek/image/filogic.mk"
-        grep -q "Device/sl3000" "$MK" || { echo "[ERROR] filogic.mk 缺少 Device/sl3000"; exit 1; }
-        grep -q "TARGET_DEVICES += sl3000" "$MK" || { echo "[ERROR] filogic.mk 缺少 TARGET_DEVICES += sl3000"; exit 1; }
+        grep -q "Device/sl3000" target/linux/mediatek/image/filogic.mk || { echo "[ERROR] filogic.mk 缺少 Device/sl3000"; exit 1; }
+        grep -q "TARGET_DEVICES += sl3000" target/linux/mediatek/image/filogic.mk || { echo "[ERROR] filogic.mk 缺少 TARGET_DEVICES += sl3000"; exit 1; }
 
         echo "[INFO] feeds 修复"
         ./scripts/feeds update -a || true
         ./scripts/feeds install -a || true
 
+        echo "[INFO] 清理冲突包"
+        sed -i '/uw-imap/d;/python3-pysocks/d;/python3-unidecode/d;/python3-charset-normalizer/d;/python3-certifi/d;/python3-idna/d' .config || true
+
         echo "[INFO] 补全 TARGET 三件套"
         grep -q "CONFIG_TARGET_mediatek=y" .config || echo "CONFIG_TARGET_mediatek=y" >> .config
         grep -q "CONFIG_TARGET_mediatek_filogic=y" .config || echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
         grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl3000-emmc=y" .config || echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl3000-emmc=y" >> .config
+
+        echo "[INFO] 移除科学上网相关配置"
+        sed -i '/passwall2/d;/xray-core/d;/v2ray-core/d;/sing-box/d;/trojan/d;/chinadns-ng/d;/dns2socks/d;/dns2tcp/d;/pdnsd-alt/d;/ipt2socks/d' .config || true
+
+        echo "[INFO] 预下载 dl 依赖"
+        make download -j8 || make download -j1 V=s
 
         make defconfig
 
@@ -104,3 +116,16 @@ jobs:
       with:
         name: firmware
         path: immortalwrt/bin/targets/*/*/*
+
+    - name: Release firmware
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: sl3000-${{ github.run_number }}
+        name: "SL3000 Firmware Build #${{ github.run_number }}"
+        body: |
+          ImmortalWrt master（25.12-SNAPSHOT） · SL3000 自动构建
+          - 自动修复：feeds / DTS / image.mk / config / 工具链 / dl
+          - 自动验证：dtb / profiles.json / 固件大小 / rootfs / kernel / SHA256
+        files: immortalwrt/bin/targets/*/*/*
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
