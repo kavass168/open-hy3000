@@ -44,65 +44,71 @@ jobs:
       run: |
         git clone --depth=1 https://github.com/openwrt/openwrt.git -b openwrt-25.12 openwrt
 
-    - name: Prepare & Auto-Fix SL3000
+    - name: Prepare SL3000 (Auto-Fix)
       run: |
         set -e
-        set -x
         ROOT="$(pwd)/openwrt"
+        cd "$ROOT"
 
         echo "[INFO] 复制三件套"
-        cp config/sl3000.config "$ROOT/.config"
-        cp dts/*.dts "$ROOT/target/linux/mediatek/dts/"
-        cp image/*.mk "$ROOT/target/linux/mediatek/image/"
+        cp -vf ../config/sl3000.config "$ROOT/.config"
+        cp -vf ../dts/*.dts "$ROOT/target/linux/mediatek/dts/"
+        cp -vf ../image/*.mk "$ROOT/target/linux/mediatek/image/"
 
-        echo "[INFO] 自动检测 DTS 文件"
-        DTS_FILE=""
-        for f in "$ROOT/target/linux/mediatek/dts"/mt7981*-sl3000*.dts; do
-          [ -f "$f" ] && DTS_FILE="$f" && break
-        done
-        [ -z "$DTS_FILE" ] && { echo "[ERROR] 未找到 SL3000 DTS 文件"; exit 1; }
+        echo "[INFO] 自动检测 DTS"
+        DTS_FILE=$(find target/linux/mediatek/dts -maxdepth 1 -name "mt7981*-sl3000*.dts" | sort | head -n1)
+        [ -z "$DTS_FILE" ] && { echo "[ERROR] 未找到 SL3000 DTS"; exit 1; }
+        DTS_NAME=$(basename "$DTS_FILE")
 
-        DTS_NAME="$(basename "$DTS_FILE")"
-        MAKEFILE="$ROOT/target/linux/mediatek/Makefile"
+        MAKEFILE="target/linux/mediatek/Makefile"
         grep -q "$DTS_NAME" "$MAKEFILE" || echo "dts-\$(CONFIG_TARGET_mediatek_filogic) += $DTS_NAME" >> "$MAKEFILE"
 
         echo "[INFO] 校验 image.mk"
-        MK="$ROOT/target/linux/mediatek/image/filogic.mk"
-        grep -q "Device/sl3000" "$MK" || echo "[ERROR] filogic.mk 缺少 Device/sl3000"
-        grep -q "TARGET_DEVICES += sl3000" "$MK" || echo "[ERROR] filogic.mk 缺少 TARGET_DEVICES += sl3000"
+        MK="target/linux/mediatek/image/filogic.mk"
+        grep -q "Device/sl3000" "$MK" || { echo "[ERROR] filogic.mk 缺少 Device/sl3000"; exit 1; }
+        grep -q "TARGET_DEVICES += sl3000" "$MK" || { echo "[ERROR] filogic.mk 缺少 TARGET_DEVICES"; exit 1; }
 
-        cd "$ROOT"
+        echo "[INFO] 修复 image/Makefile include"
+        IMG_MAKE="target/linux/mediatek/image/Makefile"
+        grep -q "filogic.mk" "$IMG_MAKE" || echo "include ./filogic.mk" >> "$IMG_MAKE"
 
         echo "[INFO] feeds 修复"
         ./scripts/feeds update -a || true
         ./scripts/feeds install -a || true
 
         echo "[INFO] 清理冲突包"
-        sed -i '/uw-imap/d;/python3-pysocks/d;/python3-unidecode/d;/CONFIG_PACKAGE_backuppc/d' .config || true
+        for p in uw-imap python3-pysocks python3-unidecode python3-charset-normalizer python3-certifi python3-idna; do
+            sed -i "/$p/d" .config || true
+        done
+        sed -i '/CONFIG_PACKAGE_backuppc/d' .config || true
 
-        echo "[INFO] defconfig 修复"
-        make defconfig || true
+        echo "[INFO] 补全 TARGET 三件套"
+        grep -q "CONFIG_TARGET_mediatek=y" .config || echo "CONFIG_TARGET_mediatek=y" >> .config
+        grep -q "CONFIG_TARGET_mediatek_filogic=y" .config || echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
+        grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl3000-emmc=y" .config || echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl3000-emmc=y" >> .config
 
-        echo "[INFO] 自动修复 gpio-button-hotplug 补丁"
+        make defconfig
+
+        echo "[INFO] 修复 gpio-button-hotplug 补丁"
         PATCH_FILE="../patches/gpio-button-hotplug/001-fix-broadcast_uevent.patch"
         PKG_DIR="package/kernel/gpio-button-hotplug"
         PATCH_DST="$PKG_DIR/patches"
+
         if [ -d "$PKG_DIR" ] && [ -f "$PATCH_FILE" ]; then
-          make package/kernel/gpio-button-hotplug/{clean,prepare} V=s || true
-          SRC_DIR=$(find build_dir/target-*/linux-*/gpio-button-hotplug -maxdepth 0 | head -n1)
-          if [ -d "$SRC_DIR" ] && patch --dry-run -p1 -d "$SRC_DIR" < "$PATCH_FILE" >/dev/null 2>&1; then
-            mkdir -p "$PATCH_DST"
-            cp "$PATCH_FILE" "$PATCH_DST/"
-          fi
+            make package/kernel/gpio-button-hotplug/{clean,prepare} V=s || true
+            SRC_DIR=$(find build_dir -type d -path "*gpio-button-hotplug*" | head -n1)
+            if [ -d "$SRC_DIR" ]; then
+                if patch --dry-run -p1 -d "$SRC_DIR" < "$PATCH_FILE" >/dev/null 2>&1; then
+                    mkdir -p "$PATCH_DST"
+                    cp "$PATCH_FILE" "$PATCH_DST/"
+                fi
+            fi
         fi
 
-        echo "[INFO] config 校验修复"
-        grep -q "CONFIG_TARGET_mediatek=y" .config || echo "CONFIG_TARGET_mediatek=y" >> .config
-        grep -q "CONFIG_TARGET_mediatek_filogic=y" .config || echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
+        echo "[INFO] 移除科学上网"
+        sed -i '/passwall2/d;/xray-core/d;/v2ray-core/d;/sing-box/d;/trojan/d;/chinadns-ng/d;/dns2socks/d;/dns2tcp/d;/pdnsd-alt/d;/ipt2socks/d' .config || true
 
-        echo "[INFO] Makefile include 修复"
-        IMG_MAKE="target/linux/mediatek/image/Makefile"
-        grep -q "filogic.mk" "$IMG_MAKE" || echo "include ./filogic.mk" >> "$IMG_MAKE"
+        make defconfig
 
     - name: Build firmware
       run: |
@@ -111,85 +117,56 @@ jobs:
         export CC="ccache gcc"
         export CXX="ccache g++"
 
-        make defconfig
-
-        echo "[INFO] 工具链自动修复"
-        make tools/compile -j1 V=s || {
-          rm -rf build_dir/host/stamp tools/stamp staging_dir/host/stamp
-          make tools/compile -j1 V=s
-        }
-
-        echo "[INFO] dl 下载自动修复"
-        make download -j$(nproc) || {
-          rm -rf dl/*
-          make download -j$(nproc)
-        }
-
-        ./scripts/feeds update -a || true
-        ./scripts/feeds install -a || true
-
-        echo "[INFO] 编译内核（详细日志，避免 syncconfig 隐藏错误）"
+        echo "[INFO] 编译内核（syncconfig 可见）"
         make target/linux/compile -j1 V=sc || {
-          echo "[WARN] 内核编译失败，重试..."
-          make target/linux/compile -j1 V=sc
+            echo "[WARN] 内核阶段失败，重试一次"
+            make target/linux/compile -j1 V=sc
         }
 
-        echo "[INFO] 编译 world（失败自动重试）"
+        echo "[INFO] 编译 world"
         make -j$(nproc) || {
-          echo "[WARN] world 编译失败，启用详细日志重试..."
-          make -j1 V=s
+            echo "[WARN] world 构建失败，单线程重试"
+            make -j1 V=s
         }
 
-        echo "[INFO] 磁盘空间检查"
-        df -h
-        USED=$(df -h | awk '$NF=="/"{print $5}' | sed 's/%//')
-        [ "$USED" -gt 90 ] && sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache
-
-        ccache -s || true
-
-    - name: Verify firmware (Auto‑Verification)
-      if: success()
+    - name: Verify firmware
       run: |
         set -e
-        echo "[INFO] 开始自动验证固件..."
         TARGET_DIR=$(find openwrt/bin/targets -maxdepth 3 -type d | grep -E "mediatek|filogic" | head -n1)
 
-        echo "[INFO] 验证 DTS 是否被编译进内核"
-        find openwrt/build_dir -name "*sl3000*.dtb" | grep sl3000 || { echo "[ERROR] 未找到 sl3000 dtb"; exit 1; }
+        echo "[INFO] 验证 DTS"
+        find openwrt/build_dir -name "*sl3000*.dtb" | grep sl3000
 
-        echo "[INFO] 验证 image.mk 是否生效"
-        grep -q sl3000 "$TARGET_DIR/profiles.json" || { echo "[ERROR] profiles.json 中未找到 sl3000"; exit 1; }
+        echo "[INFO] 验证 profiles.json"
+        grep -q sl3000 "$TARGET_DIR/profiles.json"
 
-        echo "[INFO] 验证固件是否生成"
-        ls "$TARGET_DIR"/*sl3000*.bin || { echo "[ERROR] 未生成 sl3000 固件"; exit 1; }
+        echo "[INFO] 验证固件文件"
+        ls "$TARGET_DIR"/*sl3000*.bin
 
         FW=$(ls "$TARGET_DIR"/*sl3000*.bin | head -n1)
         SIZE=$(stat -c%s "$FW")
         [ "$SIZE" -lt 4000000 ] && { echo "[ERROR] 固件大小异常"; exit 1; }
 
-        echo "[INFO] 验证 rootfs / kernel 是否存在"
-        ls "$TARGET_DIR"/*rootfs* >/dev/null || { echo "[ERROR] 未找到 rootfs"; exit 1; }
-        ls "$TARGET_DIR"/*kernel* >/dev/null || { echo "[ERROR] 未找到 kernel"; exit 1; }
+        echo "[INFO] 验证 rootfs / kernel"
+        ls "$TARGET_DIR"/*rootfs*
+        ls "$TARGET_DIR"/*kernel*
 
         echo "[INFO] 自动验证通过"
 
     - name: Upload firmware
-      if: success()
       uses: actions/upload-artifact@v4
       with:
         name: firmware
         path: openwrt/bin/targets/*/*/*
 
     - name: Release firmware
-      if: success()
       uses: softprops/action-gh-release@v2
       with:
         tag_name: sl3000-${{ github.run_number }}
         name: "SL3000 Firmware Build #${{ github.run_number }}"
         body: |
           自动构建固件（SL3000 / OpenWrt 25.12）
-          - 构建编号：${{ github.run_number }}
-          - 自动修复：工具链 / dl / feeds / 补丁 / config / DTS / image.mk / 磁盘 / 重试
+          - 自动修复：feeds / DTS / image.mk / config / 补丁
           - 自动验证：dtb / profiles.json / 固件大小 / rootfs / kernel
         files: openwrt/bin/targets/*/*/*
       env:
