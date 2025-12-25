@@ -24,7 +24,7 @@ jobs:
         sudo apt update
         sudo apt install -y build-essential clang flex bison g++ gawk gcc-multilib \
           gettext git libncurses5-dev libssl-dev python3-distutils rsync unzip zlib1g-dev \
-          file wget python3 python3-pip ccache perl pkg-config libelf-dev
+          file wget python3 python3-pip ccache perl pkg-config libelf-dev m4
 
     - name: Cache downloads
       uses: actions/cache@v4
@@ -116,6 +116,12 @@ jobs:
         export CCACHE_DIR=~/.ccache
         export CC="ccache gcc"
         export CXX="ccache g++"
+
+        echo "[INFO] 安装工具链"
+        make toolchain/install -j1 V=s
+
+        echo "[INFO] defconfig 修复"
+        make defconfig
 
         echo "[INFO] 编译内核（syncconfig 可见）"
         make target/linux/compile -j1 V=sc || {
