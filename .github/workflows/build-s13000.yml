@@ -1,4 +1,4 @@
-name: Build SL3000
+name: Build SL3000 (ImmortalWrt 25.12-SNAPSHOT)
 
 on:
   workflow_dispatch:
@@ -22,97 +22,63 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt update
-        sudo apt install -y build-essential clang flex bison g++ gawk gcc-multilib \
-          gettext git libncurses5-dev libssl-dev python3-distutils rsync unzip zlib1g-dev \
-          file wget python3 python3-pip ccache perl pkg-config libelf-dev m4
+        sudo apt install -y \
+          build-essential clang flex bison g++ gawk gcc-multilib gettext git \
+          libncurses5-dev libssl-dev python3-distutils rsync unzip zlib1g-dev \
+          file wget python3 python3-pip ccache perl pkg-config libelf-dev m4 jq
 
-    - name: Cache downloads
-      uses: actions/cache@v4
-      with:
-        path: openwrt/dl
-        key: dl-${{ runner.os }}
-        restore-keys: dl-
-
-    - name: Cache ccache
-      uses: actions/cache@v4
-      with:
-        path: ~/.ccache
-        key: ccache-${{ runner.os }}
-        restore-keys: ccache-
-
-    - name: Clone OpenWrt 25.12
+    - name: Clone ImmortalWrt master
       run: |
-        git clone --depth=1 https://github.com/openwrt/openwrt.git -b openwrt-25.12 openwrt
+        git clone --depth=1 https://github.com/immortalwrt/immortalwrt.git immortalwrt
 
-    - name: Prepare SL3000 (Auto-Fix)
+    - name: Prepare SL3000 (auto-fix)
       run: |
         set -e
-        ROOT="$(pwd)/openwrt"
+        ROOT="$(pwd)/immortalwrt"
         cd "$ROOT"
 
         echo "[INFO] 复制三件套"
-        cp -vf ../config/sl3000.config "$ROOT/.config"
-        cp -vf ../dts/*.dts "$ROOT/target/linux/mediatek/dts/"
-        cp -vf ../image/*.mk "$ROOT/target/linux/mediatek/image/"
+        cp -vf ../configs/s13000.config "$ROOT/.config"
+        cp -vf ../target/linux/mediatek/dts/mt7981b-sl3000-emmc.dts "$ROOT/target/linux/mediatek/dts/"
+        cp -vf ../target/linux/mediatek/image/filogic.mk "$ROOT/target/linux/mediatek/image/"
 
-        echo "[INFO] 自动检测 DTS"
-        DTS_FILE=$(find target/linux/mediatek/dts -maxdepth 1 -name "mt7981*-sl3000*.dts" | sort | head -n1)
+        echo "[INFO] 自动检测并注册 DTS"
+        DTS_FILE=$(find target/linux/mediatek/dts -maxdepth 1 -name "mt7981*sl3000*.dts" | sort | head -n1)
         [ -z "$DTS_FILE" ] && { echo "[ERROR] 未找到 SL3000 DTS"; exit 1; }
         DTS_NAME=$(basename "$DTS_FILE")
-
-        MAKEFILE="target/linux/mediatek/Makefile"
-        grep -q "$DTS_NAME" "$MAKEFILE" || echo "dts-\$(CONFIG_TARGET_mediatek_filogic) += $DTS_NAME" >> "$MAKEFILE"
-
-        echo "[INFO] 校验 image.mk"
-        MK="target/linux/mediatek/image/filogic.mk"
-        grep -q "Device/sl3000" "$MK" || { echo "[ERROR] filogic.mk 缺少 Device/sl3000"; exit 1; }
-        grep -q "TARGET_DEVICES += sl3000" "$MK" || { echo "[ERROR] filogic.mk 缺少 TARGET_DEVICES"; exit 1; }
+        MED_MK="target/linux/mediatek/Makefile"
+        grep -q "$DTS_NAME" "$MED_MK" || echo "dts-\$(CONFIG_TARGET_mediatek_filogic) += $DTS_NAME" >> "$MED_MK"
 
         echo "[INFO] 修复 image/Makefile include"
         IMG_MAKE="target/linux/mediatek/image/Makefile"
         grep -q "filogic.mk" "$IMG_MAKE" || echo "include ./filogic.mk" >> "$IMG_MAKE"
+
+        echo "[INFO] 校验 Device/sl3000"
+        MK="target/linux/mediatek/image/filogic.mk"
+        grep -q "Device/sl3000" "$MK" || { echo "[ERROR] filogic.mk 缺少 Device/sl3000"; exit 1; }
+        grep -q "TARGET_DEVICES += sl3000" "$MK" || { echo "[ERROR] filogic.mk 缺少 TARGET_DEVICES += sl3000"; exit 1; }
 
         echo "[INFO] feeds 修复"
         ./scripts/feeds update -a || true
         ./scripts/feeds install -a || true
 
         echo "[INFO] 清理冲突包"
-        for p in uw-imap python3-pysocks python3-unidecode python3-charset-normalizer python3-certifi python3-idna; do
-            sed -i "/$p/d" .config || true
-        done
-        sed -i '/CONFIG_PACKAGE_backuppc/d' .config || true
+        sed -i '/uw-imap/d;/python3-pysocks/d;/python3-unidecode/d;/python3-charset-normalizer/d;/python3-certifi/d;/python3-idna/d' .config || true
 
         echo "[INFO] 补全 TARGET 三件套"
         grep -q "CONFIG_TARGET_mediatek=y" .config || echo "CONFIG_TARGET_mediatek=y" >> .config
         grep -q "CONFIG_TARGET_mediatek_filogic=y" .config || echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
         grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl3000-emmc=y" .config || echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl3000-emmc=y" >> .config
 
-        make defconfig
-
-        echo "[INFO] 修复 gpio-button-hotplug 补丁"
-        PATCH_FILE="../patches/gpio-button-hotplug/001-fix-broadcast_uevent.patch"
-        PKG_DIR="package/kernel/gpio-button-hotplug"
-        PATCH_DST="$PKG_DIR/patches"
-
-        if [ -d "$PKG_DIR" ] && [ -f "$PATCH_FILE" ]; then
-            make package/kernel/gpio-button-hotplug/{clean,prepare} V=s || true
-            SRC_DIR=$(find build_dir -type d -path "*gpio-button-hotplug*" | head -n1)
-            if [ -d "$SRC_DIR" ]; then
-                if patch --dry-run -p1 -d "$SRC_DIR" < "$PATCH_FILE" >/dev/null 2>&1; then
-                    mkdir -p "$PATCH_DST"
-                    cp "$PATCH_FILE" "$PATCH_DST/"
-                fi
-            fi
-        fi
-
-        echo "[INFO] 移除科学上网"
+        echo "[INFO] 移除科学上网相关配置"
         sed -i '/passwall2/d;/xray-core/d;/v2ray-core/d;/sing-box/d;/trojan/d;/chinadns-ng/d;/dns2socks/d;/dns2tcp/d;/pdnsd-alt/d;/ipt2socks/d' .config || true
 
         make defconfig
 
     - name: Build firmware
       run: |
-        cd openwrt
+        set -e
+        cd immortalwrt
         export CCACHE_DIR=~/.ccache
         export CC="ccache gcc"
         export CXX="ccache g++"
@@ -125,25 +91,30 @@ jobs:
 
         echo "[INFO] 编译内核（syncconfig 可见）"
         make target/linux/compile -j1 V=sc || {
-            echo "[WARN] 内核阶段失败，重试一次"
-            make target/linux/compile -j1 V=sc
+          echo "[WARN] 内核阶段失败，重试一次"
+          make target/linux/compile -j1 V=sc
         }
 
+        echo "[INFO] 安装内核/镜像（明确可见）"
+        make target/linux/install -j1 V=s
+
         echo "[INFO] 编译 world"
-        make -j$(nproc) || {
-            echo "[WARN] world 构建失败，单线程重试"
-            make -j1 V=s
+        make -j"$(nproc)" || {
+          echo "[WARN] world 构建失败，单线程重试"
+          make -j1 V=s
         }
 
     - name: Verify firmware
       run: |
         set -e
-        TARGET_DIR=$(find openwrt/bin/targets -maxdepth 3 -type d | grep -E "mediatek|filogic" | head -n1)
+        TARGET_DIR=$(find immortalwrt/bin/targets -maxdepth 3 -type d | grep -E "mediatek|filogic" | head -n1)
 
-        echo "[INFO] 验证 DTS"
-        find openwrt/build_dir -name "*sl3000*.dtb" | grep sl3000
+        echo "[INFO] 验证 DTS/DTB"
+        find immortalwrt/build_dir -name "*sl3000*.dtb" | grep sl3000
 
         echo "[INFO] 验证 profiles.json"
+        test -f "$TARGET_DIR/profiles.json"
+        jq . "$TARGET_DIR/profiles.json" >/dev/null
         grep -q sl3000 "$TARGET_DIR/profiles.json"
 
         echo "[INFO] 验证固件文件"
@@ -157,13 +128,17 @@ jobs:
         ls "$TARGET_DIR"/*rootfs*
         ls "$TARGET_DIR"/*kernel*
 
+        echo "[INFO] 生成校验摘要"
+        sha256sum "$TARGET_DIR"/*sl3000*.bin > "$TARGET_DIR"/sha256.txt
+        cat "$TARGET_DIR"/sha256.txt
+
         echo "[INFO] 自动验证通过"
 
     - name: Upload firmware
       uses: actions/upload-artifact@v4
       with:
         name: firmware
-        path: openwrt/bin/targets/*/*/*
+        path: immortalwrt/bin/targets/*/*/*
 
     - name: Release firmware
       uses: softprops/action-gh-release@v2
@@ -171,9 +146,9 @@ jobs:
         tag_name: sl3000-${{ github.run_number }}
         name: "SL3000 Firmware Build #${{ github.run_number }}"
         body: |
-          自动构建固件（SL3000 / OpenWrt 25.12）
-          - 自动修复：feeds / DTS / image.mk / config / 补丁
-          - 自动验证：dtb / profiles.json / 固件大小 / rootfs / kernel
-        files: openwrt/bin/targets/*/*/*
+          ImmortalWrt master（25.12-SNAPSHOT） · SL3000 自动构建
+          - 自动修复：feeds / DTS / image.mk / config / 工具链
+          - 自动验证：dtb / profiles.json / 固件大小 / rootfs / kernel / SHA256
+        files: immortalwrt/bin/targets/*/*/*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
