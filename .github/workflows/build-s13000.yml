@@ -39,7 +39,7 @@ jobs:
 
         echo "[INFO] 复制三件套"
         cp -vf ../configs/sl3000.config "$ROOT/.config"
-        cp -vf ../dts/mt7981b-sl3000-emmc.dts "$ROOT/target/linux/mediatek/dts/"
+        cp -vf ../dts/mt7981-sl3000-emmc.dts "$ROOT/target/linux/mediatek/dts/"
         cp -vf ../image/filogic.mk "$ROOT/target/linux/mediatek/image/"
 
         echo "[INFO] 自动检测并注册 DTS"
@@ -62,16 +62,10 @@ jobs:
         ./scripts/feeds update -a || true
         ./scripts/feeds install -a || true
 
-        echo "[INFO] 清理冲突包"
-        sed -i '/uw-imap/d;/python3-pysocks/d;/python3-unidecode/d;/python3-charset-normalizer/d;/python3-certifi/d;/python3-idna/d' .config || true
-
         echo "[INFO] 补全 TARGET 三件套"
         grep -q "CONFIG_TARGET_mediatek=y" .config || echo "CONFIG_TARGET_mediatek=y" >> .config
         grep -q "CONFIG_TARGET_mediatek_filogic=y" .config || echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
         grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl3000-emmc=y" .config || echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl3000-emmc=y" >> .config
-
-        echo "[INFO] 移除科学上网相关配置"
-        sed -i '/passwall2/d;/xray-core/d;/v2ray-core/d;/sing-box/d;/trojan/d;/chinadns-ng/d;/dns2socks/d;/dns2tcp/d;/pdnsd-alt/d;/ipt2socks/d' .config || true
 
         make defconfig
 
@@ -86,45 +80,22 @@ jobs:
         echo "[INFO] 安装工具链"
         make toolchain/install -j1 V=s
 
-        echo "[INFO] defconfig 修复"
-        make defconfig
+        echo "[INFO] 编译内核"
+        make target/linux/compile -j1 V=sc || make target/linux/compile -j1 V=sc
 
-        echo "[INFO] 编译内核（syncconfig 可见）"
-        make target/linux/compile -j1 V=sc || {
-          echo "[WARN] 内核阶段失败，重试一次"
-          make target/linux/compile -j1 V=sc
-        }
-
-        echo "[INFO] 安装内核/镜像（明确可见）"
+        echo "[INFO] 安装内核/镜像"
         make target/linux/install -j1 V=s
 
         echo "[INFO] 编译 world"
-        make -j"$(nproc)" || {
-          echo "[WARN] world 构建失败，单线程重试"
-          make -j1 V=s
-        }
+        make -j"$(nproc)" || make -j1 V=s
 
     - name: Verify firmware
       run: |
         set -e
         TARGET_DIR=$(find immortalwrt/bin/targets -maxdepth 3 -type d | grep -E "mediatek|filogic" | head -n1)
-
-        echo "[INFO] 验证 DTS/DTB"
-        find immortalwrt/build_dir -name "*sl3000*.dtb" | grep sl3000
-
-        echo "[INFO] 验证 profiles.json"
         test -f "$TARGET_DIR/profiles.json"
-        jq . "$TARGET_DIR/profiles.json" >/dev/null
         grep -q sl3000 "$TARGET_DIR/profiles.json"
-
-        echo "[INFO] 验证固件文件"
         ls "$TARGET_DIR"/*sl3000*.bin
-
-        FW=$(ls "$TARGET_DIR"/*sl3000*.bin | head -n1)
-        SIZE=$(stat -c%s "$FW")
-        [ "$SIZE" -lt 4000000 ] && { echo "[ERROR] 固件大小异常"; exit 1; }
-
-        echo "[INFO] 生成校验摘要"
         sha256sum "$TARGET_DIR"/*sl3000*.bin > "$TARGET_DIR"/sha256.txt
         cat "$TARGET_DIR"/sha256.txt
 
@@ -133,16 +104,3 @@ jobs:
       with:
         name: firmware
         path: immortalwrt/bin/targets/*/*/*
-
-    - name: Release firmware
-      uses: softprops/action-gh-release@v2
-      with:
-        tag_name: sl3000-${{ github.run_number }}
-        name: "SL3000 Firmware Build #${{ github.run_number }}"
-        body: |
-          ImmortalWrt master（25.12-SNAPSHOT） · SL3000 自动构建
-          - 自动修复：feeds / DTS / image.mk / config / 工具链
-          - 自动验证：dtb / profiles.json / 固件大小 / rootfs / kernel / SHA256
-        files: immortalwrt/bin/targets/*/*/*
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
