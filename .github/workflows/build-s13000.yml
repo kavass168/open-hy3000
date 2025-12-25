@@ -42,6 +42,7 @@ jobs:
     - name: Prepare SL3000 (auto-fix)
       run: |
         set -e
+        trap 'echo "[ERROR] 构建失败，终止 job"; exit 1' ERR
         ROOT="$(pwd)/immortalwrt"
         cd "$ROOT"
 
@@ -81,9 +82,15 @@ jobs:
 
         make defconfig
 
+    - name: Keep alive
+      run: |
+        while true; do echo "[keep-alive] $(date)"; sleep 300; done &
+        echo "[INFO] 启动构建"
+
     - name: Build firmware
       run: |
         set -e
+        trap 'echo "[ERROR] 构建失败，终止 job"; exit 1' ERR
         cd immortalwrt
         export CCACHE_DIR=~/.ccache
         export CC="ccache gcc"
@@ -99,7 +106,7 @@ jobs:
         make target/linux/install -j1 V=s
 
         echo "[INFO] 编译 world"
-        make -j"$(nproc)" || make -j1 V=s
+        make -j4 || make -j1 V=s
 
     - name: Verify firmware
       run: |
@@ -125,6 +132,7 @@ jobs:
         body: |
           ImmortalWrt master（25.12-SNAPSHOT） · SL3000 自动构建
           - 自动修复：feeds / DTS / image.mk / config / 工具链 / dl
+          - 构建稳定：分段编译 / 并行限制 / 输出心跳 / 异常捕获
           - 自动验证：dtb / profiles.json / 固件大小 / rootfs / kernel / SHA256
         files: immortalwrt/bin/targets/*/*/*
       env:
