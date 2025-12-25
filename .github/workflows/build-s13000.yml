@@ -38,9 +38,9 @@ jobs:
         cd "$ROOT"
 
         echo "[INFO] 复制三件套"
-        cp -vf ../configs/s13000.config "$ROOT/.config"
-        cp -vf ../target/linux/mediatek/dts/mt7981b-sl3000-emmc.dts "$ROOT/target/linux/mediatek/dts/"
-        cp -vf ../target/linux/mediatek/image/filogic.mk "$ROOT/target/linux/mediatek/image/"
+        cp -vf configs/sl3000.config "$ROOT/.config"
+        cp -vf dts/mt7981b-sl3000-emmc.dts "$ROOT/target/linux/mediatek/dts/"
+        cp -vf image/filogic.mk "$ROOT/target/linux/mediatek/image/"
 
         echo "[INFO] 自动检测并注册 DTS"
         DTS_FILE=$(find target/linux/mediatek/dts -maxdepth 1 -name "mt7981*sl3000*.dts" | sort | head -n1)
@@ -124,15 +124,9 @@ jobs:
         SIZE=$(stat -c%s "$FW")
         [ "$SIZE" -lt 4000000 ] && { echo "[ERROR] 固件大小异常"; exit 1; }
 
-        echo "[INFO] 验证 rootfs / kernel"
-        ls "$TARGET_DIR"/*rootfs*
-        ls "$TARGET_DIR"/*kernel*
-
         echo "[INFO] 生成校验摘要"
         sha256sum "$TARGET_DIR"/*sl3000*.bin > "$TARGET_DIR"/sha256.txt
         cat "$TARGET_DIR"/sha256.txt
-
-        echo "[INFO] 自动验证通过"
 
     - name: Upload firmware
       uses: actions/upload-artifact@v4
