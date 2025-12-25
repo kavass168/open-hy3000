@@ -37,9 +37,9 @@ cp -vf ../dts/*.dts "$ROOT/target/linux/mediatek/dts/" || err "缺少 dts/*.dts"
 cp -vf ../image/*.mk "$ROOT/target/linux/mediatek/image/" || err "缺少 image/*.mk"
 
 # ============================
-# 2. 注册 DTS 到 Makefile
+# 2. 注册 DTS 到 Makefile（增强版）
 # ============================
-DTS_FILE=$(ls target/linux/mediatek/dts/mt7981*-sl3000*.dts 2>/dev/null | head -n1)
+DTS_FILE=$(find target/linux/mediatek/dts -maxdepth 1 -name "mt7981*-sl3000*.dts" | sort | head -n1)
 [ -z "$DTS_FILE" ] && err "未找到 SL3000 DTS 文件"
 
 DTS_NAME=$(basename "$DTS_FILE")
@@ -47,31 +47,42 @@ MAKEFILE="target/linux/mediatek/Makefile"
 
 grep -q "$DTS_NAME" "$MAKEFILE" || {
     echo "dts-\$(CONFIG_TARGET_mediatek_filogic) += $DTS_NAME" >> "$MAKEFILE"
-    log "已自动注册 DTS 到 mediatek/Makefile: $DTS_NAME"
+    log "已自动注册 DTS: $DTS_NAME"
 }
 
 # ============================
-# 3. 校验 image.mk 定义
+# 3. 校验 image.mk 定义 + include 修复
 # ============================
 MK="target/linux/mediatek/image/filogic.mk"
 grep -q "Device/sl3000" "$MK" || err "filogic.mk 未包含 Device/sl3000 定义"
 grep -q "TARGET_DEVICES += sl3000" "$MK" || err "filogic.mk 未添加 sl3000 到 TARGET_DEVICES"
 
-# ============================
-# 4. feeds 修复 + 冲突包清理
-# ============================
-./scripts/feeds update -a || true
-./scripts/feeds install -a || true
+IMG_MAKE="target/linux/mediatek/image/Makefile"
+grep -q "filogic.mk" "$IMG_MAKE" || echo "include ./filogic.mk" >> "$IMG_MAKE"
 
-for p in uw-imap python3-pysocks python3-unidecode; do
+# ============================
+# 4. feeds 修复 + 冲突包清理（增强版）
+# ============================
+./scripts/feeds update -a || err "feeds update 失败"
+./scripts/feeds install -a || err "feeds install 失败"
+
+for p in uw-imap python3-pysocks python3-unidecode python3-charset-normalizer python3-certifi python3-idna; do
     sed -i "/$p/d" .config || true
 done
+
 sed -i '/CONFIG_PACKAGE_backuppc/d' .config || true
 
-make defconfig || true
+# ============================
+# 5. TARGET 三件套补全（必须修复）
+# ============================
+grep -q "CONFIG_TARGET_mediatek=y" .config || echo "CONFIG_TARGET_mediatek=y" >> .config
+grep -q "CONFIG_TARGET_mediatek_filogic=y" .config || echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
+grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl3000-emmc=y" .config || echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl3000-emmc=y" >> .config
+
+make defconfig
 
 # ============================
-# 5. gpio-button-hotplug 补丁（兼容性检测）
+# 6. gpio-button-hotplug 补丁（增强版）
 # ============================
 PATCH_SRC="../patches/gpio-button-hotplug"
 PATCH_FILE="$PATCH_SRC/001-fix-broadcast_uevent.patch"
@@ -81,35 +92,44 @@ PATCH_DST="$PKG_DIR/patches"
 if [ -d "$PKG_DIR" ] && [ -f "$PATCH_FILE" ]; then
     log "检测 gpio-button-hotplug 补丁兼容性..."
     make package/kernel/gpio-button-hotplug/{clean,prepare} V=s || true
-    SRC_DIR=$(find build_dir/target-*/linux-*/gpio-button-hotplug -maxdepth 0 2>/dev/null | head -n1)
+
+    SRC_DIR=$(find build_dir -type d -path "*gpio-button-hotplug*" | head -n1)
 
     if [ -d "$SRC_DIR" ]; then
         if patch --dry-run -p1 -d "$SRC_DIR" < "$PATCH_FILE" >/dev/null 2>&1; then
-            log "补丁匹配成功，已启用"
             mkdir -p "$PATCH_DST"
             cp "$PATCH_FILE" "$PATCH_DST/"
+            log "补丁已启用"
         else
-            log "补丁不兼容，已跳过"
+            log "补丁不兼容，跳过"
         fi
     else
         log "未找到 gpio-button-hotplug 源码目录，跳过补丁"
     fi
 else
-    log "未找到 gpio-button-hotplug 补丁或包，跳过"
+    log "未找到补丁，跳过"
 fi
 
 # ============================
-# 6. 移除科学上网（Passwall2）
+# 7. 移除科学上网（彻底）
 # ============================
-log "移除科学上网相关配置（保持系统纯净）"
+log "移除科学上网相关配置"
 sed -i '/passwall2/d;/xray-core/d;/v2ray-core/d;/sing-box/d;/trojan/d;/chinadns-ng/d;/dns2socks/d;/dns2tcp/d;/pdnsd-alt/d;/ipt2socks/d' .config || true
 
-# ============================
-# 7. 构建固件
-# ============================
-log "开始构建固件..."
 make defconfig
 
+# ============================
+# 8. 构建固件（增强版）
+# ============================
+log "开始构建固件..."
+
+log "先构建内核（syncconfig 错误可见）"
+make target/linux/compile -j1 V=sc || {
+    log "内核阶段失败，重试一次"
+    make target/linux/compile -j1 V=sc
+}
+
+log "构建 world..."
 if ! make -j"$(nproc)"; then
     log "并行构建失败，尝试单线程详细模式..."
     make -j1 V=s 2>&1 | tee -a "$LOG" || { err "构建失败，请查看 $LOG"; exit 1; }
